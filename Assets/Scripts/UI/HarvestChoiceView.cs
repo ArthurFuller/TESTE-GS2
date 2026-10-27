@@ -16,12 +16,12 @@ public sealed class HarvestChoiceView : MonoBehaviour
         Hide();
     }
 
-    public void Show(CropSettings crop)
+    public void Show(CropSettings crop, int foodYield)
     {
         if (choiceGroup == null || crop == null)
             return;
         if (titleText != null) titleText.text = "Colheita de " + crop.displayName;
-        if (foodButtonText != null) foodButtonText.text = "+" + crop.foodYield + " COMIDAS";
+        if (foodButtonText != null) foodButtonText.text = "+" + foodYield + " COMIDAS";
         if (scoreButtonText != null) scoreButtonText.text = "+" + crop.scoreYield + " PONTOS";
         choiceGroup.DOKill();
         choiceGroup.blocksRaycasts = true;

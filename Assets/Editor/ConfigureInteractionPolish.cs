@@ -9,7 +9,17 @@ public static class ConfigureInteractionPolish
     [MenuItem("Tools/Configure Interaction Polish")]
     public static void Run()
     {
+        if (EditorApplication.isPlaying)
+        {
+            Debug.LogError("Pare o Play antes de configurar a cena.");
+            return;
+        }
         var scene = EditorSceneManager.OpenScene("Assets/Scenes/PrototypeLayout.unity", OpenSceneMode.Single);
+        if (Object.FindFirstObjectByType<ActivityPanelToggle>() != null)
+        {
+            Debug.Log("O painel de atividades já está configurado nesta cena.");
+            return;
+        }
         var canvas = Object.FindFirstObjectByType<Canvas>();
         var cards = new[]
         {

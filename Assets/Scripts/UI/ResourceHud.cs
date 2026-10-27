@@ -34,6 +34,6 @@ public sealed class ResourceHud : MonoBehaviour
         if (woodText != null) woodText.text = "Madeira: " + resources.Wood;
         if (foodText != null) foodText.text = "Comida: " + resources.Food;
         if (scoreText != null) scoreText.text = "Score: " + resources.Score;
-        if (seedText != null) seedText.text = "Milho: " + resources.CornSeeds + "  Abóbora: " + resources.PumpkinSeeds;
+        if (seedText != null) seedText.text = "Milho: " + resources.CornSeeds + "\nAbóbora: " + resources.PumpkinSeeds;
     }
 }

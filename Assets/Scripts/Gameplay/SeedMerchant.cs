@@ -14,6 +14,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private Transform stallDestination;
     [SerializeField] private CanvasGroup shopGroup;
     [SerializeField] private Text shopStatusText;
+    [SerializeField] private DragCursorPreview dragPreview;
     [SerializeField] private int[] marketDays = { 1, 4, 7, 10 };
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
 
@@ -81,6 +82,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
 
     public void ShowShop()
     {
+        if (dragPreview != null) dragPreview.CancelCurrentDrag();
         if (shopGroup == null)
             return;
         shopGroup.DOKill();

@@ -3,6 +3,7 @@ using UnityEngine.UI;
 
 public sealed class DragCursorPreview : MonoBehaviour
 {
+    public event System.Action CancelRequested;
     [SerializeField] private Canvas canvas;
     [SerializeField] private RectTransform previewRect;
     [SerializeField] private CanvasGroup previewGroup;
@@ -36,5 +37,11 @@ public sealed class DragCursorPreview : MonoBehaviour
     {
         if (previewGroup != null)
             previewGroup.alpha = 0;
+    }
+
+    public void CancelCurrentDrag()
+    {
+        CancelRequested?.Invoke();
+        Hide();
     }
 }

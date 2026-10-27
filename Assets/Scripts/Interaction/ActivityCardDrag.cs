@@ -10,9 +10,24 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     [SerializeField] private DragCursorPreview preview;
 
     private WorkerAssignment hoveredWorker;
+    private bool dragging;
+    private bool cancelled;
+
+    private void OnEnable()
+    {
+        if (preview != null) preview.CancelRequested += CancelDrag;
+    }
+
+    private void OnDisable()
+    {
+        if (preview != null) preview.CancelRequested -= CancelDrag;
+        CancelDrag();
+    }
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        dragging = true;
+        cancelled = false;
         if (preview != null)
             preview.Show(activityName, eventData.position);
         UpdateHover(eventData.position);
@@ -20,6 +35,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
 
     public void OnDrag(PointerEventData eventData)
     {
+        if (!dragging) return;
         if (preview != null)
             preview.Move(eventData.position);
         UpdateHover(eventData.position);
@@ -27,15 +43,32 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
 
     public void OnEndDrag(PointerEventData eventData)
     {
+        if (!dragging || cancelled)
+        {
+            ClearDrag();
+            return;
+        }
+        dragging = false;
         UpdateHover(eventData.position);
         WorkerAssignment target = hoveredWorker;
-        if (preview != null)
-            preview.Hide();
-        if (hoveredWorker != null)
-            hoveredWorker.SetHovered(false);
-        hoveredWorker = null;
+        ClearDrag();
         if (target != null)
             target.TryAssign(activity, activityName);
+    }
+
+    private void CancelDrag()
+    {
+        if (!dragging) return;
+        dragging = false;
+        cancelled = true;
+        ClearDrag();
+    }
+
+    private void ClearDrag()
+    {
+        if (preview != null) preview.Hide();
+        if (hoveredWorker != null) hoveredWorker.SetHovered(false);
+        hoveredWorker = null;
     }
 
     private void UpdateHover(Vector2 screenPosition)

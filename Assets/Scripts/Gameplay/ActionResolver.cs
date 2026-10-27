@@ -23,6 +23,7 @@ public sealed class ActionResolver : MonoBehaviour
     private WorkerAssignment pendingPlotWorker;
     private ActivityKind pendingPlotAction;
     private CropSettings pendingHarvest;
+    private int pendingHarvestFoodYield;
     private bool awaitingHarvestChoice;
     private int busyWorkers;
 
@@ -37,7 +38,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         if (dayCycle == null || !dayCycle.CanAcceptActions)
             return;
-        if (IsBusy)
+        if (awaitingHarvestChoice)
         {
             feedback.ShowMessage("Aguarde a atividade atual terminar.");
             return;
@@ -102,7 +103,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         if (dayCycle == null || !dayCycle.CanAcceptActions)
             return;
-        if (IsBusy)
+        if (awaitingHarvestChoice)
         {
             feedback.ShowMessage("Aguarde a atividade atual terminar.");
             return;
@@ -169,10 +170,11 @@ public sealed class ActionResolver : MonoBehaviour
             {
                 CropType crop = plot.Harvest();
                 pendingHarvest = seedCatalog.Get(crop);
+                pendingHarvestFoodYield = Mathf.Max(0, pendingHarvest.foodYield - worker.ProductionReduction);
                 awaitingHarvestChoice = true;
                 CropsHarvestedToday++;
                 worker.SetStatus("colheita concluída");
-                harvestChoice.Show(pendingHarvest);
+                harvestChoice.Show(pendingHarvest, pendingHarvestFoodYield);
             });
         }
     }
@@ -183,9 +185,9 @@ public sealed class ActionResolver : MonoBehaviour
             return;
         if (asFood)
         {
-            resources.AddFood(pendingHarvest.foodYield);
-            FoodGainedToday += pendingHarvest.foodYield;
-            feedback.ShowMessage("+" + pendingHarvest.foodYield + " comida da colheita");
+            resources.AddFood(pendingHarvestFoodYield);
+            FoodGainedToday += pendingHarvestFoodYield;
+            feedback.ShowMessage("+" + pendingHarvestFoodYield + " comida da colheita");
         }
         else
         {
@@ -194,6 +196,7 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("+" + pendingHarvest.scoreYield + " pontos da colheita");
         }
         pendingHarvest = null;
+        pendingHarvestFoodYield = 0;
         awaitingHarvestChoice = false;
     }
 
@@ -221,7 +224,7 @@ public sealed class ActionResolver : MonoBehaviour
         {
             if (worker == null || Vector3.Distance(worker.transform.position, worker.HomePosition) < 0.01f)
                 continue;
-            MoveWorker(worker, worker.HomePosition, null);
+            MoveWorker(worker, worker.HomePosition, null, false);
         }
     }
 
@@ -237,13 +240,14 @@ public sealed class ActionResolver : MonoBehaviour
             if (worker != null) worker.BeginNextDay();
     }
 
-    private void MoveWorker(WorkerAssignment worker, Vector3 destination, System.Action onArrived)
+    private void MoveWorker(WorkerAssignment worker, Vector3 destination, System.Action onArrived,
+        bool countAsBusy = true)
     {
-        busyWorkers++;
+        if (countAsBusy) busyWorkers++;
         worker.transform.DOKill();
         worker.transform.DOMove(destination, movementDuration * worker.MovementDurationMultiplier).SetEase(movementEase).OnComplete(() =>
         {
-            busyWorkers--;
+            if (countAsBusy) busyWorkers--;
             onArrived?.Invoke();
         });
     }
