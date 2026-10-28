@@ -7,6 +7,7 @@ public sealed class ResourceHud : MonoBehaviour
     [SerializeField] private Text woodText;
     [SerializeField] private Text foodText;
     [SerializeField] private Text scoreText;
+    [SerializeField] private Text coinText;
     [SerializeField] private Text seedText;
 
     private void OnEnable()
@@ -33,7 +34,8 @@ public sealed class ResourceHud : MonoBehaviour
             return;
         if (woodText != null) woodText.text = "Madeira: " + resources.Wood;
         if (foodText != null) foodText.text = "Comida: " + resources.Food;
-        if (scoreText != null) scoreText.text = "Score: " + resources.Score;
+        if (scoreText != null) scoreText.text = "Reputação: " + resources.Reputation;
+        if (coinText != null) coinText.text = "Moedas: " + resources.Coins;
         if (seedText != null) seedText.text = "Milho: " + resources.CornSeeds + "\nAbóbora: " + resources.PumpkinSeeds;
     }
 }

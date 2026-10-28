@@ -12,6 +12,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     public static WorkerAssignment Selected { get; private set; }
     public bool UsedToday { get; private set; }
+    public bool IsUnavailableToday { get; private set; }
     public Vector3 HomePosition { get; private set; }
     public int ProductionReduction { get; private set; }
     public float MovementDurationMultiplier { get; private set; } = 1f;
@@ -20,6 +21,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private int nextDayProductionReduction;
     private float nextDayMovementDurationMultiplier = 1f;
     private bool hovered;
+    private int absenceDaysRemaining;
 
     private void Awake()
     {
@@ -85,18 +87,25 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     public void BeginNextDay()
     {
-        UsedToday = false;
+        IsUnavailableToday = absenceDaysRemaining > 0;
+        if (IsUnavailableToday) absenceDaysRemaining--;
+        UsedToday = IsUnavailableToday;
         hovered = false;
         ProductionReduction = nextDayProductionReduction;
         MovementDurationMultiplier = nextDayMovementDurationMultiplier;
         nextDayProductionReduction = 0;
         nextDayMovementDurationMultiplier = 1f;
-        SetStatus(ProductionReduction > 0 ? "produção reduzida" :
+        SetStatus(IsUnavailableToday ? "ausente" : ProductionReduction > 0 ? "produção reduzida" :
             MovementDurationMultiplier > 1f ? "movimento lento" : "livre");
         if (selectionMarker != null)
             selectionMarker.SetActive(false);
         if (Selected == this)
             Selected = null;
+    }
+
+    public void ScheduleAbsence(int days)
+    {
+        absenceDaysRemaining = Mathf.Max(absenceDaysRemaining, days);
     }
 
     public void ScheduleNextDayCondition(int productionReduction, float movementDurationMultiplier)

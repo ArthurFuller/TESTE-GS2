@@ -22,7 +22,7 @@ public sealed class HarvestChoiceView : MonoBehaviour
             return;
         if (titleText != null) titleText.text = "Colheita de " + crop.displayName;
         if (foodButtonText != null) foodButtonText.text = "+" + foodYield + " COMIDAS";
-        if (scoreButtonText != null) scoreButtonText.text = "+" + crop.scoreYield + " PONTOS";
+        if (scoreButtonText != null) scoreButtonText.text = "+" + crop.scoreYield + " REPUTAÇÃO";
         choiceGroup.DOKill();
         choiceGroup.blocksRaycasts = true;
         choiceGroup.interactable = true;

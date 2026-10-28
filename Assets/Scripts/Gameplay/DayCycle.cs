@@ -11,6 +11,7 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField] private Plot[] plots;
     [SerializeField] private SeedCatalog seedCatalog;
     [SerializeField] private SeedMerchant merchant;
+    [SerializeField] private DeliveryMissionBoard missionBoard;
     [SerializeField] private Text dayText;
     [SerializeField] private Button finishDayButton;
     [SerializeField] private Button continueButton;
@@ -21,6 +22,9 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField, Min(0)] private int noFoodPenalty = 100;
     [SerializeField, Min(0)] private int partialProductionReduction = 1;
     [SerializeField, Min(1f)] private float noFoodMovementDurationMultiplier = 1.3333334f;
+    [SerializeField] private int workerAbsenceReputationThreshold = -200;
+    [SerializeField, Range(0f, 1f)] private float workerAbsenceChance = 0.25f;
+    [SerializeField, Min(1)] private int workerAbsenceDays = 1;
 
     private int currentDay = 1;
     private bool summaryOpen;
@@ -33,6 +37,7 @@ public sealed class DayCycle : MonoBehaviour
     {
         UpdateDayLabel();
         if (merchant != null) merchant.SetDay(currentDay);
+        if (missionBoard != null) missionBoard.SetDay(currentDay, merchant != null && merchant.IsAvailable);
     }
 
     public void FinishDay()
@@ -49,12 +54,17 @@ public sealed class DayCycle : MonoBehaviour
         int fullyFed = 0;
         int partiallyFed = 0;
         int unfed = 0;
+        int absent = 0;
         int penalty = 0;
 
         foreach (WorkerAssignment worker in workers)
         {
-            if (worker == null)
+            if (worker == null) continue;
+            if (worker.IsUnavailableToday)
+            {
+                absent++;
                 continue;
+            }
 
             int received = resources.ConsumeFood(Mathf.Min(foodPerWorker, resources.Food));
             if (received >= foodPerWorker)
@@ -76,7 +86,7 @@ public sealed class DayCycle : MonoBehaviour
             }
         }
 
-        resources.AddScore(-penalty);
+        resources.AddReputation(-penalty);
         summaryOpen = true;
         gameOver = currentDay >= totalDays;
         if (finishDayButton != null) finishDayButton.interactable = false;
@@ -89,11 +99,12 @@ public sealed class DayCycle : MonoBehaviour
         summary.AppendLine("Comida obtida: +" + actions.FoodGainedToday);
         summary.AppendLine("Terrenos arados: " + actions.PlotsPlowedToday);
         summary.AppendLine("Culturas colhidas: " + actions.CropsHarvestedToday);
-        summary.AppendLine("Pontos da colheita: +" + actions.HarvestScoreGainedToday);
+        summary.AppendLine("Reputação da colheita: +" + actions.HarvestScoreGainedToday);
         summary.AppendLine("Comida consumida: " + (foodBefore - resources.Food));
-        summary.AppendLine("Alimentados: " + fullyFed + "  |  Parcial: " + partiallyFed + "  |  Sem comida: " + unfed);
+        summary.AppendLine("Alimentados: " + fullyFed + "  |  Parcial: " + partiallyFed +
+            "  |  Sem comida: " + unfed + "  |  Ausentes: " + absent);
         summary.AppendLine("Penalidade: -" + penalty);
-        summary.Append("Score acumulado: " + resources.Score);
+        summary.Append("Reputação: " + resources.Reputation + "  |  Moedas: " + resources.Coins);
         feedback.ShowSummary(summary.ToString());
         if (merchant != null) merchant.HideShop();
         actions.ReturnWorkersHome();
@@ -106,10 +117,20 @@ public sealed class DayCycle : MonoBehaviour
 
         summaryOpen = false;
         currentDay++;
+        if (resources.Reputation <= workerAbsenceReputationThreshold &&
+            UnityEngine.Random.value < workerAbsenceChance)
+        {
+            var availableWorkers = new System.Collections.Generic.List<WorkerAssignment>();
+            foreach (WorkerAssignment worker in workers)
+                if (worker != null && !worker.IsUnavailableToday) availableWorkers.Add(worker);
+            if (availableWorkers.Count > 1)
+                availableWorkers[UnityEngine.Random.Range(0, availableWorkers.Count)].ScheduleAbsence(workerAbsenceDays);
+        }
         actions.BeginNextDay();
         foreach (Plot plot in plots)
             if (plot != null) plot.RefreshGrowth(currentDay, seedCatalog);
         if (merchant != null) merchant.SetDay(currentDay);
+        if (missionBoard != null) missionBoard.SetDay(currentDay, merchant != null && merchant.IsAvailable);
         feedback.HideSummary();
         feedback.ShowMessage("Dia " + currentDay + " de " + totalDays);
         if (finishDayButton != null) finishDayButton.interactable = true;

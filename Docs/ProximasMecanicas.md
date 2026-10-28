@@ -4,12 +4,11 @@ Estas regras são propostas para a próxima rodada de implementação. Eventos e
 
 ## Eventos aleatórios
 
-- A partir do dia 2, sortear no máximo um evento no início do dia, com chance inicial sugerida de 25%.
-- Evitar repetir o mesmo evento em dias consecutivos. Mostrar o evento em um painel antes de permitir ações.
-- **Chuva forte:** pesca produz 1 comida a menos naquele dia.
-- **Boa colheita:** a primeira colheita do dia produz 1 comida a mais caso seja convertida em comida.
-- **Árvores caídas:** a primeira coleta de madeira do dia produz 1 madeira a mais.
-- Guardar os efeitos em uma estrutura de dados separada das ações, para adicionar escolhas e novos eventos depois.
+- A cada início de dia, sortear se haverá um evento. A chance, a duração e os efeitos serão configuráveis; não precisa ocorrer todos os dias.
+- Exemplos definidos: seca prejudica plantações e pesca; pragas afetam plantações; chuva acelera crescimento e recuperação da floresta.
+- A Comadre Fulozinha usa um gatilho de exploração excessiva da floresta, separado do sorteio comum. Sua desorientação torna um trabalhador indisponível por uma duração configurável.
+- O card, o fundo escuro e o painel de descrição ficarão na Hierarquia da cena. A sequência de animação e a pesquisa para o texto estão em [MissoesELoja.md](MissoesELoja.md).
+- Remédio e oferenda para a Comadre ainda exigem regras e custos definidos.
 
 ## Melhorias compradas com madeira
 

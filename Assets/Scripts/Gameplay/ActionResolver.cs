@@ -13,7 +13,7 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField] private Transform forestDestination;
     [SerializeField] private Transform fishingDestination;
     [SerializeField, Min(0)] private int woodReward = 2;
-    [SerializeField, Min(0)] private int fishingReward = 2;
+    [SerializeField, Min(0)] private int fishingReward = 4;
     [SerializeField, Min(0.01f)] private float movementDuration = 0.7f;
     [SerializeField, Min(0.01f)] private float woodWorkDuration = 1f;
     [SerializeField, Min(0.01f)] private float fishingWorkDuration = 1f;
@@ -46,6 +46,11 @@ public sealed class ActionResolver : MonoBehaviour
         if (activity == ActivityKind.BuySeeds)
         {
             if (merchant != null) merchant.RequestVisit(worker);
+            return;
+        }
+        if (worker.IsUnavailableToday)
+        {
+            feedback.ShowMessage("Esse trabalhador está ausente hoje.");
             return;
         }
         if (worker.UsedToday)
@@ -191,9 +196,9 @@ public sealed class ActionResolver : MonoBehaviour
         }
         else
         {
-            resources.AddScore(pendingHarvest.scoreYield);
+            resources.AddReputation(pendingHarvest.scoreYield);
             HarvestScoreGainedToday += pendingHarvest.scoreYield;
-            feedback.ShowMessage("+" + pendingHarvest.scoreYield + " pontos da colheita");
+            feedback.ShowMessage("+" + pendingHarvest.scoreYield + " reputação da colheita");
         }
         pendingHarvest = null;
         pendingHarvestFoodYield = 0;
@@ -208,6 +213,13 @@ public sealed class ActionResolver : MonoBehaviour
             worker.SetStatus("na barraca");
             onArrived?.Invoke();
         });
+    }
+
+    public bool IsWorkerStoppedNear(WorkerAssignment worker, Vector3 destination, float radius)
+    {
+        return worker != null &&
+            Vector3.Distance(worker.transform.position, destination) <= radius &&
+            !DOTween.IsTweening(worker.transform);
     }
 
     private WorkerAssignment TakePendingWorker()
