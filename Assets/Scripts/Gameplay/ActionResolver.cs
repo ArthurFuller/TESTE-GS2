@@ -8,12 +8,16 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField] private GameFeedback feedback;
     [SerializeField] private SeedCatalog seedCatalog;
     [SerializeField] private SeedMerchant merchant;
-    [SerializeField] private HarvestChoiceView harvestChoice;
+    [SerializeField] private DayEventController dayEvents;
+    [SerializeField] private GatheringMinigame gatheringGame;
+    [SerializeField] private FoodPreparationPanel foodPreparationPanel;
+    [SerializeField] private InventoryTrading inventoryTrading;
+    [SerializeField] private Transform foodPreparationDestination;
+    [SerializeField, Min(0.01f)] private float foodPreparationDuration = 8f;
     [SerializeField] private WorkerAssignment[] workers;
     [SerializeField] private Transform forestDestination;
     [SerializeField] private Transform fishingDestination;
     [SerializeField, Min(0)] private int woodReward = 2;
-    [SerializeField, Min(0)] private int fishingReward = 4;
     [SerializeField, Min(0.01f)] private float movementDuration = 0.7f;
     [SerializeField, Min(0.01f)] private float woodWorkDuration = 1f;
     [SerializeField, Min(0.01f)] private float fishingWorkDuration = 1f;
@@ -22,14 +26,14 @@ public sealed class ActionResolver : MonoBehaviour
 
     private WorkerAssignment pendingPlotWorker;
     private ActivityKind pendingPlotAction;
-    private CropSettings pendingHarvest;
-    private int pendingHarvestFoodYield;
-    private bool awaitingHarvestChoice;
     private int busyWorkers;
+    private WorkerAssignment pendingFoodWorker;
 
-    public bool IsBusy => busyWorkers > 0 || awaitingHarvestChoice;
+    public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null;
     public int WoodGainedToday { get; private set; }
     public int FoodGainedToday { get; private set; }
+    public int FishGainedToday { get; private set; }
+    public int CropsStoredToday { get; private set; }
     public int PlotsPlowedToday { get; private set; }
     public int CropsHarvestedToday { get; private set; }
     public int HarvestScoreGainedToday { get; private set; }
@@ -38,9 +42,9 @@ public sealed class ActionResolver : MonoBehaviour
     {
         if (dayCycle == null || !dayCycle.CanAcceptActions)
             return;
-        if (awaitingHarvestChoice)
+        if (pendingFoodWorker != null)
         {
-            feedback.ShowMessage("Aguarde a atividade atual terminar.");
+            feedback.ShowMessage("Confirme ou cancele o preparo de comida primeiro.");
             return;
         }
         if (activity == ActivityKind.BuySeeds)
@@ -56,6 +60,25 @@ public sealed class ActionResolver : MonoBehaviour
         if (worker.UsedToday)
         {
             feedback.ShowMessage("Esse trabalhador já agiu hoje.");
+            return;
+        }
+
+        if (activity == ActivityKind.PrepareFood)
+        {
+            if (foodPreparationPanel == null || inventoryTrading == null || foodPreparationDestination == null)
+            {
+                feedback.ShowMessage("Preparação de comida não configurada.");
+                return;
+            }
+            if (pendingPlotWorker != null && !pendingPlotWorker.UsedToday)
+                pendingPlotWorker.SetStatus("livre");
+            pendingPlotWorker = null;
+            if (pendingFoodWorker != null && !pendingFoodWorker.UsedToday)
+                pendingFoodWorker.SetStatus("livre");
+            pendingFoodWorker = worker;
+            worker.Select();
+            worker.SetStatus("escolha os ingredientes");
+            foodPreparationPanel.Show();
             return;
         }
 
@@ -83,34 +106,41 @@ public sealed class ActionResolver : MonoBehaviour
 
         worker.MarkUsed(activityName);
         feedback.ShowMessage(activityName + " em andamento.");
-        float workDuration = activity == ActivityKind.CollectWood ? woodWorkDuration : fishingWorkDuration;
-        MoveAndWork(worker, destination.position, workDuration, () =>
+        System.Action<int> completeGather = rating =>
         {
             worker.SetStatus("ação concluída");
             if (activity == ActivityKind.CollectWood)
             {
-                int gained = Mathf.Max(0, woodReward - worker.ProductionReduction);
+                int gained = Mathf.Max(0, woodReward + rating - 1 - worker.ProductionReduction);
                 resources.AddWood(gained);
+                if (dayEvents != null) dayEvents.RecordWood(gained);
                 WoodGainedToday += gained;
                 feedback.ShowMessage("+" + gained + " madeira");
             }
             else
             {
-                int gained = Mathf.Max(0, fishingReward - worker.ProductionReduction);
-                resources.AddFood(gained);
-                FoodGainedToday += gained;
-                feedback.ShowMessage("+" + gained + " comida");
+                int gained = rating > 0 ? 4 : 2;
+                resources.AddFish(gained);
+                FishGainedToday += gained;
+                feedback.ShowMessage("+" + gained + " peixe(s) guardados");
             }
-        });
+        };
+        if (gatheringGame != null)
+            MoveToGatheringGame(worker, destination.position, activity, completeGather);
+        else
+        {
+            float workDuration = activity == ActivityKind.CollectWood ? woodWorkDuration : fishingWorkDuration;
+            MoveAndWork(worker, destination.position, workDuration, () => completeGather(1));
+        }
     }
 
     public void TryUsePlot(Plot plot)
     {
         if (dayCycle == null || !dayCycle.CanAcceptActions)
             return;
-        if (awaitingHarvestChoice)
+        if (pendingFoodWorker != null)
         {
-            feedback.ShowMessage("Aguarde a atividade atual terminar.");
+            feedback.ShowMessage("Confirme ou cancele o preparo de comida primeiro.");
             return;
         }
         if (pendingPlotWorker == null)
@@ -164,7 +194,7 @@ public sealed class ActionResolver : MonoBehaviour
 
         if (pendingPlotAction == ActivityKind.Harvest)
         {
-            if (seedCatalog == null || harvestChoice == null || !plot.IsReady(dayCycle.CurrentDay, seedCatalog))
+            if (seedCatalog == null || resources == null || !plot.IsReady(dayCycle.CurrentDay, seedCatalog))
             {
                 feedback.ShowMessage("A plantação ainda não está pronta.");
                 return;
@@ -174,35 +204,44 @@ public sealed class ActionResolver : MonoBehaviour
             MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
             {
                 CropType crop = plot.Harvest();
-                pendingHarvest = seedCatalog.Get(crop);
-                pendingHarvestFoodYield = Mathf.Max(0, pendingHarvest.foodYield - worker.ProductionReduction);
-                awaitingHarvestChoice = true;
+                CropSettings settings = seedCatalog.Get(crop);
+                int gained = Mathf.Max(0, settings.foodYield - worker.ProductionReduction -
+                    (dayEvents != null ? dayEvents.HarvestReduction : 0));
+                resources.AddCrop(crop, gained);
+                CropsStoredToday += gained;
                 CropsHarvestedToday++;
                 worker.SetStatus("colheita concluída");
-                harvestChoice.Show(pendingHarvest, pendingHarvestFoodYield);
+                feedback.ShowMessage("+" + gained + " " + settings.displayName + " guardado(s)");
             });
         }
     }
 
-    public void CompleteHarvest(bool asFood)
+    public bool ConfirmFoodPreparation(int fish, int corn, int pumpkin)
     {
-        if (!awaitingHarvestChoice || pendingHarvest == null)
-            return;
-        if (asFood)
+        if (pendingFoodWorker == null || pendingFoodWorker.UsedToday || inventoryTrading == null ||
+            resources == null || foodPreparationDestination == null) return false;
+        if (!inventoryTrading.TryPrepare(fish, corn, pumpkin, out int preparedFood))
         {
-            resources.AddFood(pendingHarvestFoodYield);
-            FoodGainedToday += pendingHarvestFoodYield;
-            feedback.ShowMessage("+" + pendingHarvestFoodYield + " comida da colheita");
+            feedback.ShowMessage("Selecione itens disponíveis para preparar comida.");
+            return false;
         }
-        else
+        WorkerAssignment worker = pendingFoodWorker;
+        pendingFoodWorker = null;
+        worker.MarkUsed("preparando comida");
+        MoveAndWork(worker, foodPreparationDestination.position, foodPreparationDuration, () =>
         {
-            resources.AddReputation(pendingHarvest.scoreYield);
-            HarvestScoreGainedToday += pendingHarvest.scoreYield;
-            feedback.ShowMessage("+" + pendingHarvest.scoreYield + " reputação da colheita");
-        }
-        pendingHarvest = null;
-        pendingHarvestFoodYield = 0;
-        awaitingHarvestChoice = false;
+            resources.AddFood(preparedFood);
+            FoodGainedToday += preparedFood;
+            worker.SetStatus("comida preparada");
+            feedback.ShowMessage("+" + preparedFood + " comida preparada");
+        });
+        return true;
+    }
+
+    public void CancelFoodPreparation()
+    {
+        if (pendingFoodWorker != null && !pendingFoodWorker.UsedToday) pendingFoodWorker.SetStatus("livre");
+        pendingFoodWorker = null;
     }
 
     public void TravelToMerchant(WorkerAssignment worker, Vector3 destination, System.Action onArrived)
@@ -226,6 +265,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         WorkerAssignment worker = pendingPlotWorker;
         pendingPlotWorker = null;
+        pendingFoodWorker = null;
         return worker;
     }
 
@@ -243,8 +283,11 @@ public sealed class ActionResolver : MonoBehaviour
     public void BeginNextDay()
     {
         pendingPlotWorker = null;
+        pendingFoodWorker = null;
         WoodGainedToday = 0;
         FoodGainedToday = 0;
+        FishGainedToday = 0;
+        CropsStoredToday = 0;
         PlotsPlowedToday = 0;
         CropsHarvestedToday = 0;
         HarvestScoreGainedToday = 0;
@@ -288,5 +331,23 @@ public sealed class ActionResolver : MonoBehaviour
                 onFinished?.Invoke();
             });
         });
+    }
+
+    private void MoveToGatheringGame(WorkerAssignment worker, Vector3 destination, ActivityKind activity,
+        System.Action<int> onFinished)
+    {
+        busyWorkers++;
+        worker.SetStatus("caminhando");
+        worker.transform.DOKill();
+        worker.transform.DOMove(destination, movementDuration * worker.MovementDurationMultiplier)
+            .SetEase(movementEase).OnComplete(() =>
+            {
+                worker.SetStatus("atividade interativa");
+                gatheringGame.Begin(activity, rating =>
+                {
+                    busyWorkers--;
+                    onFinished(rating);
+                }, activity == ActivityKind.Fish && dayEvents != null ? dayEvents.FishingReduction : 0);
+            });
     }
 }

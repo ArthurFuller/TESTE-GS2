@@ -92,8 +92,6 @@ public static class ConfigureDeliveryMissions
 
         var resources = Object.FindFirstObjectByType<ResourceBank>();
         SetInt(resources, "startingCoins", 2);
-        var resolver = Object.FindFirstObjectByType<ActionResolver>();
-        SetInt(resolver, "fishingReward", 4);
         var catalog = Object.FindFirstObjectByType<SeedCatalog>();
         var catalogData = new SerializedObject(catalog);
         catalogData.FindProperty("corn").FindPropertyRelative("coinCost").intValue = 2;

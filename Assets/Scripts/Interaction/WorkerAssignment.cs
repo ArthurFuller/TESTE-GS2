@@ -13,6 +13,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     public static WorkerAssignment Selected { get; private set; }
     public bool UsedToday { get; private set; }
     public bool IsUnavailableToday { get; private set; }
+    public bool WillBeUnavailableNextDay => absenceDaysRemaining > 0;
     public Vector3 HomePosition { get; private set; }
     public int ProductionReduction { get; private set; }
     public float MovementDurationMultiplier { get; private set; } = 1f;

@@ -13,6 +13,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
     public bool IsPlowed { get; private set; }
     public CropType Crop { get; private set; }
     public int PlantedDay { get; private set; }
+    private int growthAdjustment;
     public bool IsEmpty => Crop == CropType.None;
 
     public void OnPointerClick(PointerEventData eventData)
@@ -36,6 +37,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
             return;
         Crop = crop;
         PlantedDay = currentDay;
+        growthAdjustment = 0;
         if (cornVisual != null) cornVisual.SetActive(crop == CropType.Corn);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(crop == CropType.Pumpkin);
         RefreshGrowth(currentDay, null);
@@ -44,7 +46,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
     public bool IsReady(int currentDay, SeedCatalog catalog)
     {
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
-        return settings != null && currentDay >= PlantedDay + settings.growthDays;
+        return settings != null && currentDay + growthAdjustment >= PlantedDay + settings.growthDays;
     }
 
     public void RefreshGrowth(int currentDay, SeedCatalog catalog)
@@ -54,7 +56,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
             return;
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
         int growthDays = settings != null ? settings.growthDays : 2;
-        float progress = Mathf.Clamp01((float)(currentDay - PlantedDay) / growthDays);
+        float progress = Mathf.Clamp01((float)(currentDay + growthAdjustment - PlantedDay) / growthDays);
         visual.transform.DOKill();
         visual.transform.DOScale(new Vector3(1f, Mathf.Lerp(0.45f, 1f, progress), 1f), 0.35f);
     }
@@ -66,5 +68,10 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         if (cornVisual != null) cornVisual.SetActive(false);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(false);
         return harvested;
+    }
+
+    public void AdvanceGrowth(int days)
+    {
+        if (Crop != CropType.None) growthAdjustment += days;
     }
 }

@@ -6,5 +6,6 @@ public enum ActivityKind
     BuySeeds,
     PlantCorn,
     PlantPumpkin,
-    Harvest
+    Harvest,
+    PrepareFood
 }

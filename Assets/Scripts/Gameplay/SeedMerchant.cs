@@ -11,6 +11,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private DayCycle dayCycle;
     [SerializeField] private GameFeedback feedback;
     [SerializeField] private GameObject stallVisual;
+    [SerializeField] private GameObject closedStallLock;
     [SerializeField] private Transform stallDestination;
     [SerializeField] private CanvasGroup shopGroup;
     [SerializeField] private Text shopStatusText;
@@ -18,6 +19,8 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private Button pumpkinButton;
     [SerializeField] private Button foodButton;
     [SerializeField] private DragCursorPreview dragPreview;
+    [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
+    [SerializeField] private ShopTabs shopTabs;
     [SerializeField] private int[] marketDays = { 1, 4, 7, 10 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(1)] private int foodPerPurchase = 2;
@@ -33,6 +36,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     private int stockRemaining;
 
     public bool IsAvailable { get; private set; }
+    public bool IsOpen => shopGroup != null && shopGroup.interactable;
 
     private void Awake()
     {
@@ -62,6 +66,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         stockRemaining = IsAvailable ? resources.Reputation < lowReputationThreshold ? lowReputationStock :
             resources.Reputation >= highReputationThreshold ? highReputationStock : regularStock : 0;
         if (stallVisual != null) stallVisual.SetActive(IsAvailable);
+        if (closedStallLock != null) closedStallLock.SetActive(!IsAvailable);
         RefreshStockDisplay();
         HideShop();
     }
@@ -163,6 +168,9 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         if (dragPreview != null) dragPreview.CancelCurrentDrag();
         if (shopGroup == null)
             return;
+        if (activeMissionsPanel != null) activeMissionsPanel.Close();
+        if (shopTabs != null) shopTabs.ShowDefault(IsAvailable);
+        shopGroup.transform.SetAsLastSibling();
         shopGroup.DOKill();
         shopGroup.blocksRaycasts = true;
         shopGroup.interactable = true;

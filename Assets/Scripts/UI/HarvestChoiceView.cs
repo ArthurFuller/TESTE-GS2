@@ -31,13 +31,11 @@ public sealed class HarvestChoiceView : MonoBehaviour
 
     public void ChooseFood()
     {
-        if (actions != null) actions.CompleteHarvest(true);
         Hide();
     }
 
     public void ChooseScore()
     {
-        if (actions != null) actions.CompleteHarvest(false);
         Hide();
     }
 

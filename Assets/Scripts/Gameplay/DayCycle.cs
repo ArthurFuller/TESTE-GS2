@@ -12,6 +12,7 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField] private SeedCatalog seedCatalog;
     [SerializeField] private SeedMerchant merchant;
     [SerializeField] private DeliveryMissionBoard missionBoard;
+    [SerializeField] private DayEventController dayEvents;
     [SerializeField] private Text dayText;
     [SerializeField] private Button finishDayButton;
     [SerializeField] private Button continueButton;
@@ -30,7 +31,7 @@ public sealed class DayCycle : MonoBehaviour
     private bool summaryOpen;
     private bool gameOver;
 
-    public bool CanAcceptActions => !summaryOpen && !gameOver;
+    public bool CanAcceptActions => !summaryOpen && !gameOver && (dayEvents == null || !dayEvents.IsPanelOpen);
     public int CurrentDay => currentDay;
 
     private void Start()
@@ -38,6 +39,8 @@ public sealed class DayCycle : MonoBehaviour
         UpdateDayLabel();
         if (merchant != null) merchant.SetDay(currentDay);
         if (missionBoard != null) missionBoard.SetDay(currentDay, merchant != null && merchant.IsAvailable);
+        if (dayEvents != null) dayEvents.StartDay(currentDay);
+        if (actions != null) actions.BeginNextDay();
     }
 
     public void FinishDay()
@@ -97,6 +100,8 @@ public sealed class DayCycle : MonoBehaviour
         summary.AppendLine(gameOver ? "FIM DA PARTIDA" : "RESUMO DO DIA " + currentDay);
         summary.AppendLine("Madeira obtida: +" + actions.WoodGainedToday);
         summary.AppendLine("Comida obtida: +" + actions.FoodGainedToday);
+        summary.AppendLine("Peixes guardados: +" + actions.FishGainedToday);
+        summary.AppendLine("Colheita guardada: +" + actions.CropsStoredToday);
         summary.AppendLine("Terrenos arados: " + actions.PlotsPlowedToday);
         summary.AppendLine("Culturas colhidas: " + actions.CropsHarvestedToday);
         summary.AppendLine("Reputação da colheita: +" + actions.HarvestScoreGainedToday);
@@ -117,12 +122,14 @@ public sealed class DayCycle : MonoBehaviour
 
         summaryOpen = false;
         currentDay++;
+        if (dayEvents != null) dayEvents.StartDay(currentDay);
         if (resources.Reputation <= workerAbsenceReputationThreshold &&
             UnityEngine.Random.value < workerAbsenceChance)
         {
             var availableWorkers = new System.Collections.Generic.List<WorkerAssignment>();
             foreach (WorkerAssignment worker in workers)
-                if (worker != null && !worker.IsUnavailableToday) availableWorkers.Add(worker);
+                if (worker != null && !worker.IsUnavailableToday && !worker.WillBeUnavailableNextDay)
+                    availableWorkers.Add(worker);
             if (availableWorkers.Count > 1)
                 availableWorkers[UnityEngine.Random.Range(0, availableWorkers.Count)].ScheduleAbsence(workerAbsenceDays);
         }
