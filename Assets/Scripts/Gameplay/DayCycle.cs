@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
@@ -33,14 +34,15 @@ public sealed class DayCycle : MonoBehaviour
 
     public bool CanAcceptActions => !summaryOpen && !gameOver && (dayEvents == null || !dayEvents.IsPanelOpen);
     public int CurrentDay => currentDay;
+    public event Action DayChanged;
 
     private void Start()
     {
         UpdateDayLabel();
-        if (merchant != null) merchant.SetDay(currentDay);
-        if (missionBoard != null) missionBoard.SetDay(currentDay, merchant != null && merchant.IsAvailable);
+        UpdateMarket();
         if (dayEvents != null) dayEvents.StartDay(currentDay);
         if (actions != null) actions.BeginNextDay();
+        DayChanged?.Invoke();
     }
 
     public void FinishDay()
@@ -104,7 +106,6 @@ public sealed class DayCycle : MonoBehaviour
         summary.AppendLine("Colheita guardada: +" + actions.CropsStoredToday);
         summary.AppendLine("Terrenos arados: " + actions.PlotsPlowedToday);
         summary.AppendLine("Culturas colhidas: " + actions.CropsHarvestedToday);
-        summary.AppendLine("Reputação da colheita: +" + actions.HarvestScoreGainedToday);
         summary.AppendLine("Comida consumida: " + (foodBefore - resources.Food));
         summary.AppendLine("Alimentados: " + fullyFed + "  |  Parcial: " + partiallyFed +
             "  |  Sem comida: " + unfed + "  |  Ausentes: " + absent);
@@ -123,6 +124,20 @@ public sealed class DayCycle : MonoBehaviour
         summaryOpen = false;
         currentDay++;
         if (dayEvents != null) dayEvents.StartDay(currentDay);
+        ScheduleReputationAbsence();
+        actions.BeginNextDay();
+        foreach (Plot plot in plots)
+            if (plot != null) plot.RefreshGrowth(currentDay, seedCatalog);
+        UpdateMarket();
+        feedback.HideSummary();
+        feedback.ShowMessage("Dia " + currentDay + " de " + totalDays);
+        if (finishDayButton != null) finishDayButton.interactable = true;
+        UpdateDayLabel();
+        DayChanged?.Invoke();
+    }
+
+    private void ScheduleReputationAbsence()
+    {
         if (resources.Reputation <= workerAbsenceReputationThreshold &&
             UnityEngine.Random.value < workerAbsenceChance)
         {
@@ -133,15 +148,13 @@ public sealed class DayCycle : MonoBehaviour
             if (availableWorkers.Count > 1)
                 availableWorkers[UnityEngine.Random.Range(0, availableWorkers.Count)].ScheduleAbsence(workerAbsenceDays);
         }
-        actions.BeginNextDay();
-        foreach (Plot plot in plots)
-            if (plot != null) plot.RefreshGrowth(currentDay, seedCatalog);
-        if (merchant != null) merchant.SetDay(currentDay);
+    }
+
+    private void UpdateMarket()
+    {
+        if (merchant != null)
+            merchant.SetDay(currentDay, missionBoard != null && missionBoard.HasDeliveryDueOn(currentDay));
         if (missionBoard != null) missionBoard.SetDay(currentDay, merchant != null && merchant.IsAvailable);
-        feedback.HideSummary();
-        feedback.ShowMessage("Dia " + currentDay + " de " + totalDays);
-        if (finishDayButton != null) finishDayButton.interactable = true;
-        UpdateDayLabel();
     }
 
     private void UpdateDayLabel()

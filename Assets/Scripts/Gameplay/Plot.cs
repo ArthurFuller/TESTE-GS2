@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using DG.Tweening;
@@ -15,6 +16,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
     public int PlantedDay { get; private set; }
     private int growthAdjustment;
     public bool IsEmpty => Crop == CropType.None;
+    public event Action StateChanged;
 
     public void OnPointerClick(PointerEventData eventData)
     {
@@ -29,6 +31,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         IsPlowed = true;
         if (surfaceRenderer != null && plowedMaterial != null)
             surfaceRenderer.sharedMaterial = plowedMaterial;
+        StateChanged?.Invoke();
     }
 
     public void Plant(CropType crop, int currentDay)
@@ -41,6 +44,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         if (cornVisual != null) cornVisual.SetActive(crop == CropType.Corn);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(crop == CropType.Pumpkin);
         RefreshGrowth(currentDay, null);
+        StateChanged?.Invoke();
     }
 
     public bool IsReady(int currentDay, SeedCatalog catalog)
@@ -67,11 +71,13 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         Crop = CropType.None;
         if (cornVisual != null) cornVisual.SetActive(false);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(false);
+        StateChanged?.Invoke();
         return harvested;
     }
 
     public void AdvanceGrowth(int days)
     {
         if (Crop != CropType.None) growthAdjustment += days;
+        StateChanged?.Invoke();
     }
 }

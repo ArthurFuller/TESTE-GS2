@@ -13,6 +13,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private bool dragging;
     private bool cancelled;
 
+    public ActivityKind Kind => activity;
+
     private void OnEnable()
     {
         if (preview != null) preview.CancelRequested += CancelDrag;

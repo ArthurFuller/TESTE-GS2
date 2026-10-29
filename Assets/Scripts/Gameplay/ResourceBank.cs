@@ -66,42 +66,50 @@ public sealed class ResourceBank : MonoBehaviour
         return true;
     }
 
-    public bool TryDeliverFish(int amount)
+    public bool TryDeliverFish(int amount) => TryRemove(SaleItem.Fish, amount);
+    public bool TryDeliverCrop(CropType crop, int amount) => crop switch
     {
-        if (amount < 0 || Fish < amount) return false;
-        Fish -= amount;
-        Changed?.Invoke();
-        return true;
-    }
+        CropType.Corn => TryRemove(SaleItem.Corn, amount),
+        CropType.Pumpkin => TryRemove(SaleItem.Pumpkin, amount),
+        _ => false
+    };
 
-    public bool TryDeliverCrop(CropType crop, int amount)
+    public bool TrySellBatch(int[] quantities, int[] prices)
     {
-        if (amount < 0) return false;
-        if (crop == CropType.Corn && Corn >= amount) Corn -= amount;
-        else if (crop == CropType.Pumpkin && Pumpkin >= amount) Pumpkin -= amount;
-        else return false;
-        Changed?.Invoke();
-        return true;
-    }
-
-    public bool TrySell(SaleItem item, int price)
-    {
-        if (price < 0) return false;
-        switch (item)
+        if (quantities == null || prices == null || quantities.Length != 7 || prices.Length != 7) return false;
+        long total = 0;
+        int selected = 0;
+        for (int i = 0; i < quantities.Length; i++)
         {
-            case SaleItem.Wood when Wood > 0: Wood--; break;
-            case SaleItem.Fish when Fish > 0: Fish--; break;
-            case SaleItem.Corn when Corn > 0: Corn--; break;
-            case SaleItem.Pumpkin when Pumpkin > 0: Pumpkin--; break;
-            case SaleItem.Food when Food > 0: Food--; break;
-            case SaleItem.CornSeeds when CornSeeds > 0: CornSeeds--; break;
-            case SaleItem.PumpkinSeeds when PumpkinSeeds > 0: PumpkinSeeds--; break;
-            default: return false;
+            int quantity = quantities[i];
+            if (quantity < 0 || prices[i] < 0 || quantity > StockForSale((SaleItem)i)) return false;
+            if (quantity == 0) continue;
+            selected++;
+            total += (long)quantity * prices[i];
         }
-        Coins += price;
+        if (selected == 0 || total > int.MaxValue - Coins) return false;
+        Wood -= quantities[(int)SaleItem.Wood];
+        Fish -= quantities[(int)SaleItem.Fish];
+        Corn -= quantities[(int)SaleItem.Corn];
+        Pumpkin -= quantities[(int)SaleItem.Pumpkin];
+        Food -= quantities[(int)SaleItem.Food];
+        CornSeeds -= quantities[(int)SaleItem.CornSeeds];
+        PumpkinSeeds -= quantities[(int)SaleItem.PumpkinSeeds];
+        Coins += (int)total;
         Changed?.Invoke();
         return true;
     }
+
+    private int StockForSale(SaleItem item) => item switch
+    {
+        SaleItem.Wood => Wood,
+        SaleItem.Fish => Fish,
+        SaleItem.Corn => Corn,
+        SaleItem.Pumpkin => Pumpkin,
+        SaleItem.Food => Food,
+        SaleItem.CornSeeds => CornSeeds,
+        _ => PumpkinSeeds
+    };
 
     public int ConsumeFood(int amount)
     {
@@ -131,30 +139,9 @@ public sealed class ResourceBank : MonoBehaviour
         return true;
     }
 
-    public bool TryDeliverWood(int amount)
-    {
-        if (amount < 0 || Wood < amount) return false;
-        Wood -= amount;
-        Changed?.Invoke();
-        return true;
-    }
-
-    public bool TryDeliverFood(int amount)
-    {
-        if (amount < 0 || Food < amount) return false;
-        Food -= amount;
-        Changed?.Invoke();
-        return true;
-    }
-
-    public bool TrySpendWood(int amount)
-    {
-        if (amount < 0 || Wood < amount)
-            return false;
-        Wood -= amount;
-        Changed?.Invoke();
-        return true;
-    }
+    public bool TryDeliverWood(int amount) => TryRemove(SaleItem.Wood, amount);
+    public bool TryDeliverFood(int amount) => TryRemove(SaleItem.Food, amount);
+    public bool TrySpendWood(int amount) => TryRemove(SaleItem.Wood, amount);
 
     public void AddSeeds(CropType type, int amount)
     {
@@ -163,21 +150,29 @@ public sealed class ResourceBank : MonoBehaviour
         Changed?.Invoke();
     }
 
-    public bool TrySpendSeed(CropType type)
-    {
-        if (type == CropType.Corn && CornSeeds > 0) CornSeeds--;
-        else if (type == CropType.Pumpkin && PumpkinSeeds > 0) PumpkinSeeds--;
-        else return false;
-        Changed?.Invoke();
-        return true;
-    }
+    public bool TrySpendSeed(CropType type) => TryDeliverSeeds(type, 1);
 
-    public bool TryDeliverSeeds(CropType type, int amount)
+    public bool TryDeliverSeeds(CropType type, int amount) => type switch
     {
-        if (amount < 0 || Seeds(type) < amount) return false;
-        if (type == CropType.Corn) CornSeeds -= amount;
-        else if (type == CropType.Pumpkin) PumpkinSeeds -= amount;
-        else return false;
+        CropType.Corn => TryRemove(SaleItem.CornSeeds, amount),
+        CropType.Pumpkin => TryRemove(SaleItem.PumpkinSeeds, amount),
+        _ => false
+    };
+
+    private bool TryRemove(SaleItem item, int amount)
+    {
+        if (amount < 0 || StockForSale(item) < amount) return false;
+        switch (item)
+        {
+            case SaleItem.Wood: Wood -= amount; break;
+            case SaleItem.Fish: Fish -= amount; break;
+            case SaleItem.Corn: Corn -= amount; break;
+            case SaleItem.Pumpkin: Pumpkin -= amount; break;
+            case SaleItem.Food: Food -= amount; break;
+            case SaleItem.CornSeeds: CornSeeds -= amount; break;
+            case SaleItem.PumpkinSeeds: PumpkinSeeds -= amount; break;
+            default: return false;
+        }
         Changed?.Invoke();
         return true;
     }

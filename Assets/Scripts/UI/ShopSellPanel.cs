@@ -5,66 +5,67 @@ public sealed class ShopSellPanel : MonoBehaviour
 {
     [SerializeField] private InventoryTrading trading;
     [SerializeField] private ResourceBank resources;
-    [SerializeField] private Text[] itemLabels;
-    [SerializeField] private Button[] itemButtons;
-    [SerializeField] private Text selectedText;
+    [SerializeField] private ShopQuantityRow[] rows;
+    [SerializeField] private Text totalText;
     [SerializeField] private Button sellButton;
-    private SaleItem selected;
+    [SerializeField] private Button resetButton;
 
-    private static readonly string[] Names =
+    private void Awake()
     {
-        "Madeira", "Peixe", "Milho", "Abóbora", "Comida", "Sementes de milho", "Sementes de abóbora"
-    };
+        if (sellButton != null) sellButton.onClick.AddListener(Sell);
+        if (resetButton != null) resetButton.onClick.AddListener(ResetSelection);
+    }
 
     private void OnEnable()
     {
-        if (resources != null) resources.Changed += Refresh;
-        Refresh();
+        if (resources != null) resources.Changed += RefreshDisplay;
+        if (rows != null)
+            foreach (ShopQuantityRow row in rows)
+                if (row != null) row.Changed += RefreshDisplay;
+        RefreshDisplay();
     }
 
     private void OnDisable()
     {
-        if (resources != null) resources.Changed -= Refresh;
+        if (resources != null) resources.Changed -= RefreshDisplay;
+        if (rows != null)
+            foreach (ShopQuantityRow row in rows)
+                if (row != null) row.Changed -= RefreshDisplay;
     }
 
-    private void Start() => Refresh();
-    public void RefreshDisplay() => Refresh();
-
-    public void SelectWood() => Select(SaleItem.Wood);
-    public void SelectFish() => Select(SaleItem.Fish);
-    public void SelectCorn() => Select(SaleItem.Corn);
-    public void SelectPumpkin() => Select(SaleItem.Pumpkin);
-    public void SelectFood() => Select(SaleItem.Food);
-    public void SelectCornSeeds() => Select(SaleItem.CornSeeds);
-    public void SelectPumpkinSeeds() => Select(SaleItem.PumpkinSeeds);
-
-    public void SellSelected()
+    public void ResetSelection()
     {
-        if (trading != null) trading.TrySellOne(selected);
-        Refresh();
+        if (rows == null) return;
+        foreach (ShopQuantityRow row in rows)
+            if (row != null) row.ResetQuantity();
+        RefreshDisplay();
     }
 
-    private void Select(SaleItem item)
+    public void Sell()
     {
-        selected = item;
-        Refresh();
+        if (trading == null || rows == null || rows.Length != 7) return;
+        int[] quantities = new int[7];
+        for (int i = 0; i < rows.Length; i++)
+            quantities[i] = rows[i] == null ? 0 : rows[i].Quantity;
+        if (trading.TrySellBatch(quantities)) ResetSelection();
     }
 
-    private void Refresh()
+    public void RefreshDisplay()
     {
-        if (trading == null) return;
-        for (int i = 0; i < Names.Length; i++)
+        if (trading == null || rows == null) return;
+        long total = 0;
+        for (int i = 0; i < rows.Length; i++)
         {
-            var item = (SaleItem)i;
-            int stock = trading.GetStock(item);
-            if (itemLabels != null && i < itemLabels.Length && itemLabels[i] != null)
-                itemLabels[i].text = Names[i] + "   " + stock + " un.   " + trading.GetPrice(item) + " moedas";
-            if (itemButtons != null && i < itemButtons.Length && itemButtons[i] != null)
-                itemButtons[i].interactable = stock > 0;
+            ShopQuantityRow row = rows[i];
+            if (row == null) continue;
+            SaleItem item = (SaleItem)i;
+            int price = trading.GetPrice(item);
+            row.SetPrice(price);
+            row.SetStock(trading.GetStock(item));
+            row.SetLimit(trading.GetStock(item));
+            total += (long)row.Quantity * price;
         }
-        if (selectedText != null)
-            selectedText.text = "Selecionado: " + Names[(int)selected] + " • " +
-                trading.GetPrice(selected) + " moedas por unidade";
-        if (sellButton != null) sellButton.interactable = trading.GetStock(selected) > 0;
+        if (totalText != null) totalText.text = "RECEBER: " + total + " moedas";
+        if (sellButton != null) sellButton.interactable = total > 0;
     }
 }

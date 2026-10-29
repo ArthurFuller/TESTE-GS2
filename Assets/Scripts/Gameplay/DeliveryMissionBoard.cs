@@ -40,6 +40,13 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
     private int lastGeneratedDay;
     private bool marketOpen;
 
+    public bool HasDeliveryDueOn(int day)
+    {
+        foreach (DeliveryMission mission in missions)
+            if (mission.accepted && mission.dueDay == day) return true;
+        return false;
+    }
+
     private void OnEnable()
     {
         if (resources != null) resources.Changed += Refresh;
@@ -225,13 +232,12 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
         }
         DeliveryMission selected = missions[selectedIndex];
         int stock = InStock(selected.item);
+        int daysLeft = selected.dueDay - currentDay + 1;
         if (orderText != null)
-            orderText.text = "PEDIDO " + (selectedIndex + 1) + " / " + missions.Count + "\n" +
-                selected.title + "\nEntregar " + selected.quantity + " " + ItemName(selected.item) +
-                " (estoque: " + stock + ")\nPrazo: dia " + selected.dueDay +
-                " • " + (selected.dueDay - currentDay + 1) + " dia(s)\nRecompensa: +" +
-                selected.reputationReward + " reputação, +" + selected.coinReward + " moedas\n" +
-                (selected.accepted ? "Aceito: entregue aqui." : "Disponível para aceitar.");
+            orderText.text = selected.title + "\nEntregar " + selected.quantity + " " + ItemName(selected.item) +
+                " (estoque: " + stock + ")\nPrazo: " + daysLeft + (daysLeft == 1 ? " dia" : " dias") +
+                "\nRecompensa: +" + selected.reputationReward + " reputação, +" +
+                selected.coinReward + " moedas";
         if (acceptButton != null) acceptButton.interactable = marketOpen && !selected.accepted;
         if (deliverButton != null) deliverButton.interactable = selected.accepted && stock >= selected.quantity;
         if (nextButton != null) nextButton.interactable = missions.Count > 1;

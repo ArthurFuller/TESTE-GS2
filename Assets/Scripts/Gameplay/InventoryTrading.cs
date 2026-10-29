@@ -40,20 +40,21 @@ public sealed class InventoryTrading : MonoBehaviour
         _ => pumpkinSeedPrice
     };
 
-    public bool TrySellOne(SaleItem item)
+    public bool TrySellBatch(int[] quantities)
     {
-        if (merchant == null || !merchant.IsAvailable || !merchant.IsOpen)
+        if (merchant == null || !merchant.IsAvailable || !merchant.IsOpen || resources == null)
         {
             if (feedback != null) feedback.ShowMessage("Visite a barraca aberta para vender.");
             return false;
         }
-        int price = GetPrice(item);
-        if (resources == null || !resources.TrySell(item, price))
+        int[] prices = new int[7];
+        for (int i = 0; i < prices.Length; i++) prices[i] = GetPrice((SaleItem)i);
+        if (!resources.TrySellBatch(quantities, prices))
         {
-            if (feedback != null) feedback.ShowMessage("Item indisponível no estoque.");
+            if (feedback != null) feedback.ShowMessage("Confira as quantidades escolhidas para venda.");
             return false;
         }
-        if (feedback != null) feedback.ShowMessage("Venda concluída: +" + price + " moeda(s).");
+        if (feedback != null) feedback.ShowMessage("Venda concluída.");
         return true;
     }
 
