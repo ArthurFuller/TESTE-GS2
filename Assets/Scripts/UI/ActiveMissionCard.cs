@@ -14,8 +14,7 @@ public sealed class ActiveMissionCard : MonoBehaviour
         if (itemIcon != null) itemIcon.sprite = icon;
         if (quantityText != null) quantityText.text = mission.quantity + "x " + ItemName(mission.item) +
             " · estoque " + stock;
-        if (rewardText != null) rewardText.text = "+" + mission.coinReward + " moedas  +" +
-            mission.reputationReward + " rep.  · dia " + mission.dueDay;
+        if (rewardText != null) rewardText.text = "+" + mission.coinReward + " moedas  · dia " + mission.dueDay;
     }
 
     private static string ItemName(DeliveryItem item) => item switch

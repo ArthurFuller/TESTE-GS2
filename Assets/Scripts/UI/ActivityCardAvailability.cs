@@ -8,7 +8,6 @@ public sealed class ActivityCardAvailability : MonoBehaviour
     [SerializeField] private DayCycle dayCycle;
     [SerializeField] private SeedCatalog seedCatalog;
     [SerializeField] private Plot[] plots;
-    [SerializeField, Min(0)] private float firstCardX = 8f;
     [SerializeField, Min(1)] private float cardSpacing = 76f;
 
     private void OnEnable()
@@ -44,10 +43,18 @@ public sealed class ActivityCardAvailability : MonoBehaviour
             if (card == null) continue;
             bool show = IsAvailable(card.Kind);
             card.gameObject.SetActive(show);
-            if (!show) continue;
+            if (show && card.Kind != ActivityKind.BuySeeds) visible++;
+        }
+        if (visible == 0) return;
+        RectTransform panel = transform as RectTransform;
+        float start = (panel.rect.width - (visible - 1) * cardSpacing - 140f) * 0.5f;
+        int index = 0;
+        foreach (ActivityCardDrag card in cards)
+        {
+            if (card == null || !card.gameObject.activeSelf || card.Kind == ActivityKind.BuySeeds) continue;
             RectTransform rect = card.GetComponent<RectTransform>();
-            rect.anchoredPosition = new Vector2(firstCardX + visible * cardSpacing, rect.anchoredPosition.y);
-            visible++;
+            rect.anchoredPosition = new Vector2(start + index * cardSpacing, rect.anchoredPosition.y);
+            index++;
         }
     }
 

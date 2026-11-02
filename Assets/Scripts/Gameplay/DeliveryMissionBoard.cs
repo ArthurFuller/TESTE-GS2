@@ -12,7 +12,6 @@ public sealed class DeliveryMission
     public DeliveryItem item;
     public int quantity;
     public int dueDay;
-    public int reputationReward;
     public int coinReward;
     public bool accepted;
 }
@@ -29,8 +28,6 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
     [SerializeField, Range(1, 5)] private int minimumOffers = 2;
     [SerializeField, Range(1, 5)] private int maximumOffers = 3;
     [SerializeField, Min(1)] private int campaignDays = 12;
-    [SerializeField] private int lowReputationThreshold = 0;
-    [SerializeField] private int highReputationThreshold = 300;
     [SerializeField, Range(0, 3)] private int returningOffersPerMarket = 1;
 
     private readonly List<DeliveryMission> missions = new List<DeliveryMission>();
@@ -118,10 +115,8 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             if (feedback != null) feedback.ShowMessage("Ainda faltam itens para a entrega.");
             return;
         }
-        resources.AddReputation(mission.reputationReward);
         resources.AddCoins(mission.coinReward);
-        if (feedback != null) feedback.ShowMessage("Entrega concluída! +" + mission.reputationReward +
-            " reputação, +" + mission.coinReward + " moedas.");
+        if (feedback != null) feedback.ShowMessage("Entrega concluída! +" + mission.coinReward + " moedas.");
         missions.RemoveAt(index);
         selectedIndex = Mathf.Clamp(selectedIndex, 0, Mathf.Max(0, missions.Count - 1));
         Refresh();
@@ -129,15 +124,8 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
 
     private void GenerateOffers()
     {
-        int tier = resources.Reputation < lowReputationThreshold ? 0 :
-            resources.Reputation >= highReputationThreshold ? 2 : 1;
         var pool = new List<DeliveryItem> { DeliveryItem.Wood, DeliveryItem.Food, DeliveryItem.CornSeeds,
-            DeliveryItem.Fish, DeliveryItem.Corn };
-        if (tier > 0)
-        {
-            pool.Add(DeliveryItem.PumpkinSeeds);
-            pool.Add(DeliveryItem.Pumpkin);
-        }
+            DeliveryItem.Fish, DeliveryItem.Corn, DeliveryItem.PumpkinSeeds, DeliveryItem.Pumpkin };
         int count = Mathf.Clamp(UnityEngine.Random.Range(minimumOffers, maximumOffers + 1), 1, pool.Count);
         int returning = Mathf.Min(returningOffersPerMarket, Mathf.Min(count, returningOffers.Count));
         for (int i = 0; i < returning; i++)
@@ -145,7 +133,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             int pick = UnityEngine.Random.Range(0, returningOffers.Count);
             DeliveryMission offer = returningOffers[pick];
             returningOffers.RemoveAt(pick);
-            offer.dueDay = Mathf.Min(campaignDays, currentDay + (tier == 0 ? 3 : 2));
+            offer.dueDay = Mathf.Min(campaignDays, currentDay + 2);
             missions.Add(offer);
             pool.Remove(offer.item);
         }
@@ -155,29 +143,27 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             int pick = UnityEngine.Random.Range(0, pool.Count);
             DeliveryItem item = pool[pick];
             pool.RemoveAt(pick);
-            int quantity = QuantityFor(item, tier);
-            int duration = tier == 0 ? 4 : 3;
+            int quantity = QuantityFor(item);
             missions.Add(new DeliveryMission
             {
                 title = RandomTitle(item),
                 item = item,
                 quantity = quantity,
-                dueDay = Mathf.Min(campaignDays, currentDay + duration - 1),
-                reputationReward = 50 + quantity * 25 + tier * 25,
-                coinReward = 2 + quantity + tier
+                dueDay = Mathf.Min(campaignDays, currentDay + 2),
+                coinReward = 3 + quantity
             });
         }
     }
 
-    private static int QuantityFor(DeliveryItem item, int tier)
+    private static int QuantityFor(DeliveryItem item)
     {
-        if (item == DeliveryItem.Wood) return UnityEngine.Random.Range(1 + tier, 3 + tier);
-        if (item == DeliveryItem.Food) return UnityEngine.Random.Range(2 + tier, 4 + tier);
-        if (item == DeliveryItem.CornSeeds) return tier == 0 ? 1 : UnityEngine.Random.Range(1, 2 + tier);
-        if (item == DeliveryItem.Fish) return UnityEngine.Random.Range(1 + tier, 3 + tier);
+        if (item == DeliveryItem.Wood) return UnityEngine.Random.Range(2, 4);
+        if (item == DeliveryItem.Food) return UnityEngine.Random.Range(3, 5);
+        if (item == DeliveryItem.CornSeeds) return UnityEngine.Random.Range(1, 3);
+        if (item == DeliveryItem.Fish) return UnityEngine.Random.Range(2, 4);
         if (item == DeliveryItem.Corn || item == DeliveryItem.Pumpkin)
-            return UnityEngine.Random.Range(1 + tier, 3 + tier);
-        return tier == 2 ? 2 : 1;
+            return UnityEngine.Random.Range(2, 4);
+        return 1;
     }
 
     private static string RandomTitle(DeliveryItem item)
@@ -236,8 +222,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
         if (orderText != null)
             orderText.text = selected.title + "\nEntregar " + selected.quantity + " " + ItemName(selected.item) +
                 " (estoque: " + stock + ")\nPrazo: " + daysLeft + (daysLeft == 1 ? " dia" : " dias") +
-                "\nRecompensa: +" + selected.reputationReward + " reputação, +" +
-                selected.coinReward + " moedas";
+                "\nRecompensa: +" + selected.coinReward + " moedas";
         if (acceptButton != null) acceptButton.interactable = marketOpen && !selected.accepted;
         if (deliverButton != null) deliverButton.interactable = selected.accepted && stock >= selected.quantity;
         if (nextButton != null) nextButton.interactable = missions.Count > 1;

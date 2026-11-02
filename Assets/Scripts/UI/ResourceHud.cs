@@ -6,7 +6,6 @@ public sealed class ResourceHud : MonoBehaviour
     [SerializeField] private ResourceBank resources;
     [SerializeField] private Text woodText;
     [SerializeField] private Text foodText;
-    [SerializeField] private Text scoreText;
     [SerializeField] private Text coinText;
     [SerializeField] private Text seedText;
 
@@ -34,9 +33,8 @@ public sealed class ResourceHud : MonoBehaviour
             return;
         if (woodText != null) woodText.text = "Madeira: " + resources.Wood;
         if (foodText != null) foodText.text = "Comida: " + resources.Food;
-        if (scoreText != null) scoreText.text = "Reputação: " + resources.Reputation;
-        if (coinText != null) coinText.text = "Moedas: " + resources.Coins;
-        if (seedText != null) seedText.text = "Sementes:\nMilho " + resources.CornSeeds + " · Abóbora " +
+        if (coinText != null) coinText.text = "Dinheiro: " + resources.Coins;
+        if (seedText != null) seedText.text = "Sementes: Milho " + resources.CornSeeds + " · Abóbora " +
             resources.PumpkinSeeds;
     }
 }

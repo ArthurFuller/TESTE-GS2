@@ -20,13 +20,8 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField] private Text continueButtonText;
     [SerializeField, Min(1)] private int totalDays = 12;
     [SerializeField, Min(1)] private int foodPerWorker = 2;
-    [SerializeField, Min(0)] private int partialFoodPenalty = 50;
-    [SerializeField, Min(0)] private int noFoodPenalty = 100;
     [SerializeField, Min(0)] private int partialProductionReduction = 1;
     [SerializeField, Min(1f)] private float noFoodMovementDurationMultiplier = 1.3333334f;
-    [SerializeField] private int workerAbsenceReputationThreshold = -200;
-    [SerializeField, Range(0f, 1f)] private float workerAbsenceChance = 0.25f;
-    [SerializeField, Min(1)] private int workerAbsenceDays = 1;
 
     private int currentDay = 1;
     private bool summaryOpen;
@@ -60,7 +55,6 @@ public sealed class DayCycle : MonoBehaviour
         int partiallyFed = 0;
         int unfed = 0;
         int absent = 0;
-        int penalty = 0;
 
         foreach (WorkerAssignment worker in workers)
         {
@@ -71,7 +65,7 @@ public sealed class DayCycle : MonoBehaviour
                 continue;
             }
 
-            int received = resources.ConsumeFood(Mathf.Min(foodPerWorker, resources.Food));
+            int received = resources.ConsumeFood(foodPerWorker);
             if (received >= foodPerWorker)
             {
                 fullyFed++;
@@ -80,18 +74,15 @@ public sealed class DayCycle : MonoBehaviour
             else if (received > 0)
             {
                 partiallyFed++;
-                penalty += partialFoodPenalty;
                 worker.ScheduleNextDayCondition(partialProductionReduction, 1f);
             }
             else
             {
                 unfed++;
-                penalty += noFoodPenalty;
                 worker.ScheduleNextDayCondition(0, noFoodMovementDurationMultiplier);
             }
         }
 
-        resources.AddReputation(-penalty);
         summaryOpen = true;
         gameOver = currentDay >= totalDays;
         if (finishDayButton != null) finishDayButton.interactable = false;
@@ -109,8 +100,7 @@ public sealed class DayCycle : MonoBehaviour
         summary.AppendLine("Comida consumida: " + (foodBefore - resources.Food));
         summary.AppendLine("Alimentados: " + fullyFed + "  |  Parcial: " + partiallyFed +
             "  |  Sem comida: " + unfed + "  |  Ausentes: " + absent);
-        summary.AppendLine("Penalidade: -" + penalty);
-        summary.Append("Reputação: " + resources.Reputation + "  |  Moedas: " + resources.Coins);
+        summary.Append("Dinheiro: " + resources.Coins);
         feedback.ShowSummary(summary.ToString());
         if (merchant != null) merchant.HideShop();
         actions.ReturnWorkersHome();
@@ -124,7 +114,6 @@ public sealed class DayCycle : MonoBehaviour
         summaryOpen = false;
         currentDay++;
         if (dayEvents != null) dayEvents.StartDay(currentDay);
-        ScheduleReputationAbsence();
         actions.BeginNextDay();
         foreach (Plot plot in plots)
             if (plot != null) plot.RefreshGrowth(currentDay, seedCatalog);
@@ -134,20 +123,6 @@ public sealed class DayCycle : MonoBehaviour
         if (finishDayButton != null) finishDayButton.interactable = true;
         UpdateDayLabel();
         DayChanged?.Invoke();
-    }
-
-    private void ScheduleReputationAbsence()
-    {
-        if (resources.Reputation <= workerAbsenceReputationThreshold &&
-            UnityEngine.Random.value < workerAbsenceChance)
-        {
-            var availableWorkers = new System.Collections.Generic.List<WorkerAssignment>();
-            foreach (WorkerAssignment worker in workers)
-                if (worker != null && !worker.IsUnavailableToday && !worker.WillBeUnavailableNextDay)
-                    availableWorkers.Add(worker);
-            if (availableWorkers.Count > 1)
-                availableWorkers[UnityEngine.Random.Range(0, availableWorkers.Count)].ScheduleAbsence(workerAbsenceDays);
-        }
     }
 
     private void UpdateMarket()
@@ -160,6 +135,6 @@ public sealed class DayCycle : MonoBehaviour
     private void UpdateDayLabel()
     {
         if (dayText != null)
-            dayText.text = "Dia: " + currentDay + " / " + totalDays;
+            dayText.text = "Dia " + currentDay;
     }
 }

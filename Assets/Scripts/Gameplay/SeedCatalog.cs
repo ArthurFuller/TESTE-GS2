@@ -10,7 +10,6 @@ public sealed class CropSettings
     [Min(1)] public int seedsPerPurchase;
     [Min(1)] public int growthDays;
     [Min(0)] public int foodYield;
-    [Min(0)] public int scoreYield;
 }
 
 public sealed class SeedCatalog : MonoBehaviour
@@ -18,12 +17,12 @@ public sealed class SeedCatalog : MonoBehaviour
     [SerializeField] private CropSettings corn = new CropSettings
     {
         type = CropType.Corn, displayName = "Milho", coinCost = 2, seedsPerPurchase = 2,
-        growthDays = 2, foodYield = 4, scoreYield = 100
+        growthDays = 2, foodYield = 4
     };
     [SerializeField] private CropSettings pumpkin = new CropSettings
     {
         type = CropType.Pumpkin, displayName = "Abóbora", coinCost = 3, seedsPerPurchase = 1,
-        growthDays = 3, foodYield = 7, scoreYield = 200
+        growthDays = 3, foodYield = 7
     };
 
     public CropSettings Get(CropType type)

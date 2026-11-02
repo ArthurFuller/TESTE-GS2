@@ -23,9 +23,6 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
     [SerializeField, Min(0.01f)] private float arrivalRadius = 0.55f;
-    [SerializeField, Range(0f, 1f)] private float lowReputationVisitChance = 0.6f;
-    [SerializeField] private int lowReputationThreshold = 0;
-    [SerializeField] private int highReputationThreshold = 300;
 
     public event Action AvailabilityChanged;
     public bool IsAvailable { get; private set; }
@@ -37,9 +34,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     public void SetDay(int day, bool hasDeliveryDue = false)
     {
         bool scheduled = Array.IndexOf(marketDays, day) >= 0;
-        IsAvailable = hasDeliveryDue || (scheduled && resources != null &&
-            (resources.Reputation >= lowReputationThreshold || day == 1 || day == 10 ||
-             UnityEngine.Random.value < lowReputationVisitChance));
+        IsAvailable = hasDeliveryDue || scheduled;
         if (stallVisual != null) stallVisual.SetActive(IsAvailable);
         if (closedStallLock != null) closedStallLock.SetActive(!IsAvailable);
         HideShop();
@@ -84,18 +79,14 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
 
     public int GetUnitPrice(SaleItem item)
     {
-        if (resources == null || catalog == null) return 0;
-        int basePrice = item switch
+        if (catalog == null) return 0;
+        return item switch
         {
             SaleItem.CornSeeds => catalog.Get(CropType.Corn).coinCost,
             SaleItem.PumpkinSeeds => catalog.Get(CropType.Pumpkin).coinCost,
             SaleItem.Food => foodCoinCost,
             _ => 0
         };
-        if (basePrice <= 0) return 0;
-        int adjustment = resources.Reputation < lowReputationThreshold ? 1 :
-            resources.Reputation >= highReputationThreshold ? -1 : 0;
-        return Mathf.Max(1, basePrice + adjustment);
     }
 
     public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int food)

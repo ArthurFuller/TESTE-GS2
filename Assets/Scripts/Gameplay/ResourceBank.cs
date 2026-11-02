@@ -9,7 +9,6 @@ public sealed class ResourceBank : MonoBehaviour
 
     public int Wood { get; private set; }
     public int Food { get; private set; }
-    public int Reputation { get; private set; }
     public int Coins { get; private set; }
     public int CornSeeds { get; private set; }
     public int PumpkinSeeds { get; private set; }
@@ -22,7 +21,6 @@ public sealed class ResourceBank : MonoBehaviour
     {
         Wood = startingWood;
         Food = startingFood;
-        Reputation = 0;
         Coins = startingCoins;
         CornSeeds = 0;
         PumpkinSeeds = 0;
@@ -117,12 +115,6 @@ public sealed class ResourceBank : MonoBehaviour
         Food -= consumed;
         Changed?.Invoke();
         return consumed;
-    }
-
-    public void AddReputation(int amount)
-    {
-        Reputation += amount;
-        Changed?.Invoke();
     }
 
     public void AddCoins(int amount)
