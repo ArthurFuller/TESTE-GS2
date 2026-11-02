@@ -5,9 +5,12 @@ public sealed class ResourceHud : MonoBehaviour
 {
     [SerializeField] private ResourceBank resources;
     [SerializeField] private Text woodText;
+    [SerializeField] private Text fishText;
+    [SerializeField] private Text cassavaText;
+    [SerializeField] private Text pumpkinText;
+    [SerializeField] private Text cornText;
     [SerializeField] private Text foodText;
     [SerializeField] private Text coinText;
-    [SerializeField] private Text seedText;
 
     private void OnEnable()
     {
@@ -31,10 +34,12 @@ public sealed class ResourceHud : MonoBehaviour
     {
         if (resources == null)
             return;
-        if (woodText != null) woodText.text = "Madeira: " + resources.Wood;
+        if (woodText != null) woodText.text = resources.Wood.ToString();
+        if (fishText != null) fishText.text = resources.Fish.ToString();
+        if (cassavaText != null) cassavaText.text = "0";
+        if (pumpkinText != null) pumpkinText.text = resources.Pumpkin.ToString();
+        if (cornText != null) cornText.text = resources.Corn.ToString();
         if (foodText != null) foodText.text = "Comida: " + resources.Food;
         if (coinText != null) coinText.text = "Dinheiro: " + resources.Coins;
-        if (seedText != null) seedText.text = "Sementes: Milho " + resources.CornSeeds + " · Abóbora " +
-            resources.PumpkinSeeds;
     }
 }
