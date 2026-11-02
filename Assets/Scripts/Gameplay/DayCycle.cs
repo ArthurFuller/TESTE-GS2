@@ -46,7 +46,8 @@ public sealed class DayCycle : MonoBehaviour
             return;
         if (actions.IsBusy)
         {
-            feedback.ShowMessage("Aguarde o fim das ações.");
+            feedback.ShowMessage(actions.GatheringNeedsPlayer ?
+                "Inicie a coleta pendente pelo botão do trabalhador." : "Aguarde o fim das ações.");
             return;
         }
 

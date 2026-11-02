@@ -1,5 +1,6 @@
 using DG.Tweening;
 using UnityEngine;
+using UnityEngine.UI;
 
 public sealed class ActionResolver : MonoBehaviour
 {
@@ -10,6 +11,11 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField] private SeedMerchant merchant;
     [SerializeField] private DayEventController dayEvents;
     [SerializeField] private GatheringMinigame gatheringGame;
+    [SerializeField] private CommunityCamera communityCamera;
+    [SerializeField] private Button forestVisitButton;
+    [SerializeField] private Text forestVisitLabel;
+    [SerializeField] private Button fishingVisitButton;
+    [SerializeField] private Text fishingVisitLabel;
     [SerializeField] private FoodPreparationPanel foodPreparationPanel;
     [SerializeField] private InventoryTrading inventoryTrading;
     [SerializeField] private Transform foodPreparationDestination;
@@ -17,24 +23,87 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField] private WorkerAssignment[] workers;
     [SerializeField] private Transform forestDestination;
     [SerializeField] private Transform fishingDestination;
+    [SerializeField] private Transform villageExit;
+    [SerializeField] private Transform fencePassage;
     [SerializeField, Min(0)] private int woodReward = 2;
     [SerializeField, Min(0.01f)] private float movementDuration = 0.7f;
+    [SerializeField, Min(0.01f)] private float outsideMovementDuration = 7f;
     [SerializeField, Min(0.01f)] private float plowWorkDuration = 1f;
     [SerializeField] private Ease movementEase = Ease.InOutSine;
+    [SerializeField, Min(0f)] private float arrivalStillTime = 0.2f;
+
+    private sealed class GatheringTask
+    {
+        public readonly ActivityKind Activity;
+        public readonly Transform Destination;
+        public readonly Button Button;
+        public readonly Text Label;
+        public WorkerAssignment Worker;
+        public bool Arrived;
+        public bool Started;
+        public float StillTime;
+        public Vector3 LastPosition;
+
+        public GatheringTask(ActivityKind activity, Transform destination, Button button, Text label)
+        {
+            Activity = activity;
+            Destination = destination;
+            Button = button;
+            Label = label;
+        }
+    }
 
     private WorkerAssignment pendingPlotWorker;
     private ActivityKind pendingPlotAction;
     private int busyWorkers;
     private WorkerAssignment pendingFoodWorker;
-    private WorkerAssignment gatheringWorker;
+    private GatheringTask forestTask;
+    private GatheringTask fishingTask;
+    private GatheringTask activeMinigame;
 
-    public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null;
+    public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null ||
+        forestTask?.Worker != null || fishingTask?.Worker != null;
+    public bool GatheringNeedsPlayer =>
+        (forestTask?.Worker != null && forestTask.Arrived && !forestTask.Started) ||
+        (fishingTask?.Worker != null && fishingTask.Arrived && !fishingTask.Started);
     public int WoodGainedToday { get; private set; }
     public int FoodGainedToday { get; private set; }
     public int FishGainedToday { get; private set; }
     public int CropsStoredToday { get; private set; }
     public int PlotsPlowedToday { get; private set; }
     public int CropsHarvestedToday { get; private set; }
+
+    private void Start()
+    {
+        forestTask = new GatheringTask(ActivityKind.CollectWood, forestDestination,
+            forestVisitButton, forestVisitLabel);
+        fishingTask = new GatheringTask(ActivityKind.Fish, fishingDestination,
+            fishingVisitButton, fishingVisitLabel);
+        if (forestVisitButton != null)
+        {
+            forestVisitButton.onClick.AddListener(VisitForestWorker);
+            forestVisitButton.gameObject.SetActive(false);
+        }
+        if (fishingVisitButton != null)
+        {
+            fishingVisitButton.onClick.AddListener(VisitFishingWorker);
+            fishingVisitButton.gameObject.SetActive(false);
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (forestVisitButton != null)
+            forestVisitButton.onClick.RemoveListener(VisitForestWorker);
+        if (fishingVisitButton != null)
+            fishingVisitButton.onClick.RemoveListener(VisitFishingWorker);
+    }
+
+    private void Update()
+    {
+        UpdateGathering(forestTask);
+        UpdateGathering(fishingTask);
+    }
 
     public void TryAssign(WorkerAssignment worker, ActivityKind activity, string activityName)
     {
@@ -60,10 +129,11 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Esse trabalhador já agiu hoje.");
             return;
         }
-        if ((activity == ActivityKind.CollectWood || activity == ActivityKind.Fish) &&
-            gatheringGame != null && gatheringWorker != null)
+        GatheringTask task = activity == ActivityKind.CollectWood ? forestTask :
+            activity == ActivityKind.Fish ? fishingTask : null;
+        if (task != null && task.Worker != null)
         {
-            feedback.ShowMessage("Aguarde a atividade de coleta em andamento.");
+            feedback.ShowMessage("Já há um trabalhador nessa área de coleta.");
             return;
         }
 
@@ -122,23 +192,28 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void StartGathering(WorkerAssignment worker, ActivityKind activity, string activityName)
     {
-        Transform destination = activity == ActivityKind.CollectWood ? forestDestination : fishingDestination;
-        if (destination == null || resources == null)
+        GatheringTask task = activity == ActivityKind.CollectWood ? forestTask : fishingTask;
+        if (task == null || task.Destination == null || villageExit == null ||
+            fencePassage == null || resources == null)
         {
             feedback.ShowMessage("Destino ou recursos não configurados.");
             return;
         }
-        if (gatheringGame == null || !gatheringGame.CanStart())
+        if (gatheringGame == null || !gatheringGame.CanStart() ||
+            communityCamera == null || task.Button == null)
         {
             feedback.ShowMessage("Minigame de coleta não configurado.");
             return;
         }
 
-        gatheringWorker = worker;
+        task.Worker = worker;
+        task.Arrived = false;
+        task.Started = false;
+        task.StillTime = 0f;
         worker.MarkUsed(activityName);
-        feedback.ShowMessage(activityName + " em andamento.");
-        MoveToGatheringGame(worker, destination.position, activity,
-            rating => CompleteGathering(worker, activity, rating));
+        feedback.ShowMessage(activityName + " em andamento. Use o botão para acompanhar.");
+        UpdateVisitButton(task);
+        MoveToGatheringArea(task);
     }
 
     private void CompleteGathering(WorkerAssignment worker, ActivityKind activity, int rating)
@@ -312,9 +387,13 @@ public sealed class ActionResolver : MonoBehaviour
         pendingPlotWorker = null;
         foreach (WorkerAssignment worker in workers)
         {
-            if (worker == null || Vector3.Distance(worker.transform.position, worker.HomePosition) < 0.01f)
+            if (worker == null || DOTween.IsTweening(worker.transform) ||
+                Vector3.Distance(worker.transform.position, worker.HomePosition) < 0.01f)
                 continue;
-            MoveWorker(worker, worker.HomePosition, null, false);
+            if (fencePassage != null && villageExit != null &&
+                worker.transform.position.x < fencePassage.position.x)
+                MoveAlongRoute(worker, new[] { fencePassage.position, villageExit.position, worker.HomePosition }, null, false);
+            else MoveWorker(worker, worker.HomePosition, null, false);
         }
     }
 
@@ -368,20 +447,126 @@ public sealed class ActionResolver : MonoBehaviour
         });
     }
 
-    private void MoveToGatheringGame(WorkerAssignment worker, Vector3 destination, ActivityKind activity,
-        System.Action<int> onFinished)
+    private void MoveToGatheringArea(GatheringTask task)
     {
+        WorkerAssignment worker = task.Worker;
         worker.SetStatus("caminhando");
-        MoveWorker(worker, destination, () =>
+        MoveAlongRoute(worker, new[] { villageExit.position, fencePassage.position,
+            task.Destination.position }, () =>
         {
-            busyWorkers++;
-            worker.SetStatus("atividade interativa");
-            gatheringGame.Begin(activity, rating =>
-            {
-                busyWorkers--;
-                if (gatheringWorker == worker) gatheringWorker = null;
-                onFinished(rating);
-            }, activity == ActivityKind.Fish && dayEvents != null ? dayEvents.FishingReduction : 0);
+            task.Arrived = true;
+            task.LastPosition = worker.transform.position;
+            task.StillTime = 0f;
+            worker.SetStatus("aguardando jogador");
+            UpdateVisitButton(task);
+        });
+    }
+
+    private void VisitForestWorker() => VisitGatheringWorker(forestTask);
+    private void VisitFishingWorker() => VisitGatheringWorker(fishingTask);
+
+    private void VisitGatheringWorker(GatheringTask task)
+    {
+        if (task?.Worker != null && activeMinigame == null)
+            communityCamera.Follow(task.Worker.transform);
+    }
+
+    private void UpdateGathering(GatheringTask task)
+    {
+        if (task?.Worker == null || task.Started) return;
+        if (task.Arrived)
+        {
+            Vector3 position = task.Worker.transform.position;
+            bool stopped = !DOTween.IsTweening(task.Worker.transform) &&
+                Vector3.Distance(position, task.Destination.position) < 0.03f &&
+                (position - task.LastPosition).sqrMagnitude < 0.000001f;
+            task.StillTime = stopped ? task.StillTime + Time.deltaTime : 0f;
+            task.LastPosition = position;
+        }
+        UpdateVisitButton(task);
+        if (task.Arrived && task.StillTime >= arrivalStillTime && activeMinigame == null &&
+            communityCamera.IsFollowing(task.Worker.transform) && communityCamera.IsFollowReady)
+            BeginGatheringGame(task);
+    }
+
+    private void UpdateVisitButton(GatheringTask task)
+    {
+        if (task?.Button == null) return;
+        bool visible = task.Worker != null && !task.Started && activeMinigame == null &&
+            !communityCamera.IsFollowing(task.Worker.transform);
+        if (task.Button.gameObject.activeSelf != visible)
+            task.Button.gameObject.SetActive(visible);
+        if (visible && task.Label != null)
+        {
+            string area = task.Activity == ActivityKind.CollectWood ? "FLORESTA" : "PESCA";
+            string action = task.Arrived && task.StillTime >= arrivalStillTime ? "INICIAR" : "ACOMPANHAR";
+            string label = area + " - " + action + "\n" + task.Worker.DisplayName;
+            if (task.Label.text != label) task.Label.text = label;
+        }
+    }
+
+    private void BeginGatheringGame(GatheringTask task)
+    {
+        WorkerAssignment worker = task.Worker;
+        ActivityKind activity = task.Activity;
+        task.Started = true;
+        activeMinigame = task;
+        communityCamera.SetFollowLocked(true);
+        UpdateVisitButton(forestTask);
+        UpdateVisitButton(fishingTask);
+        busyWorkers++;
+        worker.SetStatus("atividade interativa");
+        gatheringGame.Begin(activity, rating =>
+        {
+            busyWorkers--;
+            task.Worker = null;
+            task.Arrived = false;
+            task.Started = false;
+            activeMinigame = null;
+            communityCamera.SetFollowLocked(false);
+            communityCamera.ReturnToCommunity();
+            CompleteGathering(worker, activity, rating);
+            SendGatheringWorkerHome(worker);
+            UpdateVisitButton(forestTask);
+            UpdateVisitButton(fishingTask);
+        }, activity == ActivityKind.Fish && dayEvents != null ? dayEvents.FishingReduction : 0);
+    }
+
+    private void SendGatheringWorkerHome(WorkerAssignment worker)
+    {
+        int returnDay = dayCycle.CurrentDay;
+        worker.SetStatus("voltando para casa");
+        MoveAlongRoute(worker, new[] { fencePassage.position, villageExit.position,
+            worker.HomePosition }, () =>
+        {
+            if (dayCycle.CurrentDay == returnDay) worker.SetStatus("em casa");
+        }, false);
+    }
+
+    private void MoveAlongRoute(WorkerAssignment worker, Vector3[] points, System.Action onArrived, bool countAsBusy = true)
+    {
+        worker.transform.DOKill();
+        float distance = 0f;
+        Vector3 from = worker.transform.position;
+        foreach (Vector3 point in points)
+        {
+            distance += Vector3.Distance(from, point);
+            from = point;
+        }
+        if (countAsBusy) busyWorkers++;
+        Sequence route = DOTween.Sequence();
+        from = worker.transform.position;
+        foreach (Vector3 point in points)
+        {
+            float duration = outsideMovementDuration * worker.MovementDurationMultiplier *
+                Vector3.Distance(from, point) / Mathf.Max(distance, 0.01f);
+            route.Append(worker.transform.DOMove(point, Mathf.Max(duration, 0.01f)).SetEase(Ease.Linear));
+            from = point;
+        }
+        route.OnComplete(() =>
+        {
+            if (countAsBusy) busyWorkers--;
+            onArrived?.Invoke();
         });
     }
 }

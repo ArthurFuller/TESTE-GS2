@@ -1,0 +1,3750 @@
+diff --git a/Assets/Editor/CommunityCameraEditor.cs b/Assets/Editor/CommunityCameraEditor.cs
+new file mode 100644
+index 0000000..2d4647e
+--- /dev/null
++++ b/Assets/Editor/CommunityCameraEditor.cs
+@@ -0,0 +1,212 @@
++using UnityEditor;
++using UnityEditor.SceneManagement;
++using UnityEngine;
++
++[CustomEditor(typeof(CommunityCamera))]
++public sealed class CommunityCameraEditor : Editor
++{
++    public override void OnInspectorGUI()
++    {
++        serializedObject.Update();
++        CommunityCamera controller = (CommunityCamera)target;
++        Transform cameraTransform = controller.ViewTransform;
++
++        if (EditorApplication.isPlaying)
++        {
++            EditorGUILayout.HelpBox("Os ajustes deste painel serão salvos na cena ao parar o Play.", MessageType.Info);
++            if (GUILayout.Button("Usar a vista atual como início"))
++            {
++                controller.UseCurrentViewAsHome();
++                CommunityCameraPlaySave.RecordCurrentView(controller);
++            }
++        }
++
++        EditorGUILayout.LabelField("Enquadramento inicial", EditorStyles.boldLabel);
++        EditorGUI.BeginChangeCheck();
++        Vector3 position = EditorGUILayout.Vector3Field("Posição X / Y / Z", cameraTransform.localPosition);
++        if (EditorGUI.EndChangeCheck())
++        {
++            Undo.RecordObject(cameraTransform, "Alterar posição inicial da câmera");
++            cameraTransform.localPosition = position;
++            if (EditorApplication.isPlaying) controller.UseCurrentViewAsHome();
++            CommunityCameraPlaySave.RecordPose(controller);
++            Refresh(cameraTransform);
++        }
++
++        EditorGUI.BeginChangeCheck();
++        Vector3 rotation = EditorGUILayout.Vector3Field("Rotação X / Y / Z", cameraTransform.localEulerAngles);
++        if (EditorGUI.EndChangeCheck())
++        {
++            Undo.RecordObject(cameraTransform, "Alterar rotação inicial da câmera");
++            cameraTransform.localEulerAngles = rotation;
++            if (EditorApplication.isPlaying) controller.UseCurrentViewAsHome();
++            CommunityCameraPlaySave.RecordPose(controller);
++            Refresh(cameraTransform);
++        }
++
++        float groundAngle = -cameraTransform.forward.y;
++        float distance = groundAngle > 0.01f ? cameraTransform.position.y / groundAngle : 0f;
++        if (groundAngle > 0.01f)
++        {
++            EditorGUI.BeginChangeCheck();
++            float nextDistance = EditorGUILayout.FloatField("Distância inicial", distance);
++            if (EditorGUI.EndChangeCheck())
++            {
++                Undo.RecordObject(cameraTransform, "Alterar distância inicial da câmera");
++                Vector3 focus = cameraTransform.position + cameraTransform.forward * distance;
++                cameraTransform.position = focus - cameraTransform.forward * Mathf.Max(0.1f, nextDistance);
++                if (EditorApplication.isPlaying) controller.UseCurrentViewAsHome();
++                CommunityCameraPlaySave.RecordPose(controller);
++                Refresh(cameraTransform);
++                distance = Mathf.Max(0.1f, nextDistance);
++            }
++        }
++        else EditorGUILayout.HelpBox("A câmera precisa apontar para o chão para ajustar a distância.", MessageType.Warning);
++
++        EditorGUI.BeginChangeCheck();
++        float fieldOfView = EditorGUILayout.Slider("Campo de visão (FOV)", controller.FieldOfView, 1f, 179f);
++        if (EditorGUI.EndChangeCheck())
++        {
++            Undo.RecordObject(controller.CommunityShot != null ?
++                (Object)controller.CommunityShot : controller.GetComponent<Camera>(),
++                "Alterar campo de visão da câmera");
++            controller.FieldOfView = fieldOfView;
++            CommunityCameraPlaySave.RecordFieldOfView(fieldOfView);
++            Refresh(cameraTransform);
++        }
++
++        EditorGUILayout.Space();
++        EditorGUILayout.LabelField("Limites da visão", EditorStyles.boldLabel);
++        EditorGUILayout.HelpBox("Azul: retângulo máximo visível no chão. Amarelo: visão atual. X e Z param separadamente nas bordas.", MessageType.Info);
++        DrawProperty("useCustomViewBounds", "Personalizar retângulo azul");
++        SerializedProperty customBounds = serializedObject.FindProperty("useCustomViewBounds");
++        if (GUILayout.Button("Copiar enquadramento do zoom out") &&
++            controller.GetAutomaticViewBounds(out Vector2 automaticMin, out Vector2 automaticMax))
++        {
++            customBounds.boolValue = true;
++            serializedObject.FindProperty("minimumView").vector2Value = automaticMin;
++            serializedObject.FindProperty("maximumView").vector2Value = automaticMax;
++            CommunityCameraPlaySave.RecordCustomBounds(true, automaticMin, automaticMax);
++            Refresh(cameraTransform);
++        }
++        if (customBounds.boolValue)
++        {
++            DrawViewCorner("minimumView", "Borda mínima X / Z");
++            DrawViewCorner("maximumView", "Borda máxima X / Z");
++            Vector2 minView = serializedObject.FindProperty("minimumView").vector2Value;
++            Vector2 maxView = serializedObject.FindProperty("maximumView").vector2Value;
++            if (minView.x >= maxView.x || minView.y >= maxView.y)
++                EditorGUILayout.HelpBox("A borda mínima precisa ficar antes da máxima em X e Z.", MessageType.Warning);
++            else if (controller.GetAutomaticViewBounds(out Vector2 zoomOutMin,
++                out Vector2 zoomOutMax) &&
++                (minView.x > zoomOutMin.x || minView.y > zoomOutMin.y ||
++                 maxView.x < zoomOutMax.x || maxView.y < zoomOutMax.y))
++                EditorGUILayout.HelpBox("O enquadramento no zoom out ultrapassa o retângulo personalizado.", MessageType.Warning);
++        }
++        EditorGUILayout.Space();
++        EditorGUILayout.LabelField("Limites adicionais da posição", EditorStyles.boldLabel);
++        DrawProperty("useAdditionalPositionLimits", "Usar limites extras X / Z");
++        bool useAdditionalLimits = serializedObject.FindProperty("useAdditionalPositionLimits").boolValue;
++        Transform minimum = useAdditionalLimits ? DrawBoundary("Limite extra mínimo X / Z", "minimumCorner") : null;
++        Transform maximum = useAdditionalLimits ? DrawBoundary("Limite extra máximo X / Z", "maximumCorner") : null;
++        DrawProperty("closestDistance", "Distância mínima (zoom máximo)");
++        DrawProperty("farthestDistance", "Distância máxima (zoom mínimo)");
++
++        float closest = serializedObject.FindProperty("closestDistance").floatValue;
++        float farthest = serializedObject.FindProperty("farthestDistance").floatValue;
++        if (closest > farthest)
++            EditorGUILayout.HelpBox("A distância mínima precisa ser menor que a máxima.", MessageType.Warning);
++        else if (groundAngle > 0.01f && (distance < closest || distance > farthest))
++            EditorGUILayout.HelpBox("A distância inicial precisa ficar entre os dois limites de zoom.", MessageType.Warning);
++        if (minimum != null && maximum != null &&
++            (minimum.position.x >= maximum.position.x || minimum.position.z >= maximum.position.z))
++            EditorGUILayout.HelpBox("O limite extra mínimo precisa ficar antes do máximo em X e Z.", MessageType.Warning);
++        else if (minimum != null && maximum != null &&
++            (cameraTransform.position.x < minimum.position.x || cameraTransform.position.x > maximum.position.x ||
++             cameraTransform.position.z < minimum.position.z || cameraTransform.position.z > maximum.position.z))
++            EditorGUILayout.HelpBox("A posição inicial da câmera está fora dos limites extras X/Z.", MessageType.Warning);
++        else if (minimum != null && maximum != null && groundAngle > 0.01f)
++        {
++            Vector3 farPosition = cameraTransform.position + cameraTransform.forward * (distance - farthest);
++            if (farPosition.x < minimum.position.x || farPosition.x > maximum.position.x ||
++                farPosition.z < minimum.position.z || farPosition.z > maximum.position.z)
++                EditorGUILayout.HelpBox("Os limites extras não incluem a câmera no zoom out. O eixo incompatível será limitado apenas pelo retângulo azul.", MessageType.Warning);
++        }
++
++        EditorGUILayout.Space();
++        EditorGUILayout.LabelField("Velocidades e acompanhamento", EditorStyles.boldLabel);
++        DrawProperty("panSpeed", "Movimento WASD");
++        DrawProperty("zoomStep", "Zoom por passo do scroll");
++        DrawProperty("keyboardZoomSpeed", "Zoom por teclado");
++        DrawProperty("farZoomPanRadius", "Expansão além do zoom out");
++        DrawProperty("followDistance", "Distância ao trabalhador");
++        DrawProperty("smoothTime", "Suavidade do movimento");
++        DrawProperty("communityButton", "Botão Comunidade");
++
++        serializedObject.ApplyModifiedProperties();
++    }
++
++    private Transform DrawBoundary(string label, string propertyName)
++    {
++        SerializedProperty property = serializedObject.FindProperty(propertyName);
++        Transform marker = property.objectReferenceValue as Transform;
++        if (marker == null)
++        {
++            EditorGUILayout.PropertyField(property, new GUIContent(label));
++            return null;
++        }
++
++        EditorGUI.BeginChangeCheck();
++        Vector2 value = EditorGUILayout.Vector2Field(label,
++            new Vector2(marker.position.x, marker.position.z));
++        if (EditorGUI.EndChangeCheck())
++        {
++            Undo.RecordObject(marker, "Alterar limite da câmera");
++            marker.position = new Vector3(value.x, marker.position.y, value.y);
++            CommunityCameraPlaySave.RecordBoundary(propertyName == "minimumCorner", marker.position);
++            Refresh(marker);
++        }
++        return marker;
++    }
++
++    private void DrawProperty(string name, string label)
++    {
++        SerializedProperty property = serializedObject.FindProperty(name);
++        EditorGUI.BeginChangeCheck();
++        EditorGUILayout.PropertyField(property, new GUIContent(label));
++        if (EditorGUI.EndChangeCheck())
++        {
++            if (property.propertyType == SerializedPropertyType.Float)
++                CommunityCameraPlaySave.RecordField(name, property.floatValue);
++            else if (name == "useAdditionalPositionLimits")
++                CommunityCameraPlaySave.RecordAdditionalLimits(property.boolValue);
++            else if (name == "useCustomViewBounds")
++                CommunityCameraPlaySave.RecordCustomBounds(property.boolValue,
++                    serializedObject.FindProperty("minimumView").vector2Value,
++                    serializedObject.FindProperty("maximumView").vector2Value);
++            Refresh(((CommunityCamera)target).transform);
++        }
++    }
++
++    private void DrawViewCorner(string name, string label)
++    {
++        SerializedProperty property = serializedObject.FindProperty(name);
++        EditorGUI.BeginChangeCheck();
++        EditorGUILayout.PropertyField(property, new GUIContent(label));
++        if (EditorGUI.EndChangeCheck())
++        {
++            CommunityCameraPlaySave.RecordCustomBounds(true,
++                serializedObject.FindProperty("minimumView").vector2Value,
++                serializedObject.FindProperty("maximumView").vector2Value);
++            Refresh(((CommunityCamera)target).transform);
++        }
++    }
++
++    private void Refresh(Transform changed)
++    {
++        if (!EditorApplication.isPlaying)
++            EditorSceneManager.MarkSceneDirty(changed.gameObject.scene);
++        SceneView.RepaintAll();
++        EditorApplication.QueuePlayerLoopUpdate();
++    }
++}
+diff --git a/Assets/Editor/CommunityCameraEditor.cs.meta b/Assets/Editor/CommunityCameraEditor.cs.meta
+new file mode 100644
+index 0000000..8b1279a
+--- /dev/null
++++ b/Assets/Editor/CommunityCameraEditor.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 4d2ecb2eeb5b4f245b7db20c025493cd
+\ No newline at end of file
+diff --git a/Assets/Editor/CommunityCameraPlaySave.cs b/Assets/Editor/CommunityCameraPlaySave.cs
+new file mode 100644
+index 0000000..b6fff72
+--- /dev/null
++++ b/Assets/Editor/CommunityCameraPlaySave.cs
+@@ -0,0 +1,246 @@
++using System;
++using UnityEditor;
++using UnityEditor.SceneManagement;
++using UnityEngine;
++using UnityEngine.SceneManagement;
++
++[InitializeOnLoad]
++public static class CommunityCameraPlaySave
++{
++    [Serializable]
++    private sealed class Settings
++    {
++        public string scenePath;
++        public bool changed;
++        public Vector3 position;
++        public Vector3 rotation;
++        public Vector3 minimum;
++        public Vector3 maximum;
++        public bool useAdditionalPositionLimits;
++        public bool useCustomViewBounds;
++        public Vector2 minimumView;
++        public Vector2 maximumView;
++        public float fieldOfView;
++        public float panSpeed;
++        public float zoomStep;
++        public float keyboardZoomSpeed;
++        public float closestDistance;
++        public float farthestDistance;
++        public float followDistance;
++        public float smoothTime;
++        public float farZoomPanRadius;
++    }
++
++    private const string Key = "Sertao.CommunityCamera.PlaySettings";
++
++    static CommunityCameraPlaySave()
++    {
++        EditorApplication.playModeStateChanged += OnPlayModeChanged;
++    }
++
++    public static void RecordPose(CommunityCamera camera)
++    {
++        Record(settings =>
++        {
++            settings.position = camera.ViewTransform.localPosition;
++            settings.rotation = camera.ViewTransform.localEulerAngles;
++        });
++    }
++
++    public static void RecordFieldOfView(float value)
++    {
++        Record(settings => settings.fieldOfView = value);
++    }
++
++    public static void RecordAdditionalLimits(bool value)
++    {
++        Record(settings => settings.useAdditionalPositionLimits = value);
++    }
++
++    public static void RecordCustomBounds(bool enabled, Vector2 minimum, Vector2 maximum)
++    {
++        Record(settings =>
++        {
++            settings.useCustomViewBounds = enabled;
++            settings.minimumView = minimum;
++            settings.maximumView = maximum;
++        });
++    }
++
++    public static void RecordCurrentView(CommunityCamera camera)
++    {
++        Record(settings =>
++        {
++            settings.position = camera.ViewTransform.localPosition;
++            settings.rotation = camera.ViewTransform.localEulerAngles;
++            settings.fieldOfView = camera.FieldOfView;
++        });
++    }
++
++    public static void RecordField(string name, float value)
++    {
++        Record(settings =>
++        {
++            switch (name)
++            {
++                case "panSpeed": settings.panSpeed = value; break;
++                case "zoomStep": settings.zoomStep = value; break;
++                case "keyboardZoomSpeed": settings.keyboardZoomSpeed = value; break;
++                case "closestDistance": settings.closestDistance = value; break;
++                case "farthestDistance": settings.farthestDistance = value; break;
++                case "followDistance": settings.followDistance = value; break;
++                case "smoothTime": settings.smoothTime = value; break;
++                case "farZoomPanRadius": settings.farZoomPanRadius = value; break;
++            }
++        });
++    }
++
++    public static void RecordBoundary(bool minimum, Vector3 position)
++    {
++        Record(settings =>
++        {
++            if (minimum) settings.minimum = position;
++            else settings.maximum = position;
++        });
++    }
++
++    private static void Record(Action<Settings> change)
++    {
++        if (!EditorApplication.isPlaying) return;
++        Settings settings = Read();
++        if (settings == null) return;
++        change(settings);
++        settings.changed = true;
++        SessionState.SetString(Key, JsonUtility.ToJson(settings));
++    }
++
++    private static void OnPlayModeChanged(PlayModeStateChange state)
++    {
++        if (state == PlayModeStateChange.ExitingEditMode)
++        {
++            CommunityCamera camera = FindCamera(SceneManager.GetActiveScene().path);
++            if (camera != null)
++                SessionState.SetString(Key, JsonUtility.ToJson(Capture(camera)));
++        }
++        else if (state == PlayModeStateChange.ExitingPlayMode)
++        {
++            Settings settings = Read();
++            CommunityCamera camera = settings != null ? FindCamera(settings.scenePath) : null;
++            if (camera != null)
++            {
++                Settings current = Capture(camera);
++                settings.changed |= settings.fieldOfView != current.fieldOfView ||
++                    settings.minimum != current.minimum || settings.maximum != current.maximum ||
++                    settings.useAdditionalPositionLimits != current.useAdditionalPositionLimits ||
++                    settings.useCustomViewBounds != current.useCustomViewBounds ||
++                    settings.minimumView != current.minimumView || settings.maximumView != current.maximumView ||
++                    settings.panSpeed != current.panSpeed || settings.zoomStep != current.zoomStep ||
++                    settings.keyboardZoomSpeed != current.keyboardZoomSpeed ||
++                    settings.closestDistance != current.closestDistance ||
++                    settings.farthestDistance != current.farthestDistance ||
++                    settings.followDistance != current.followDistance || settings.smoothTime != current.smoothTime ||
++                    settings.farZoomPanRadius != current.farZoomPanRadius;
++                settings.fieldOfView = current.fieldOfView;
++                settings.minimum = current.minimum;
++                settings.maximum = current.maximum;
++                settings.useAdditionalPositionLimits = current.useAdditionalPositionLimits;
++                settings.useCustomViewBounds = current.useCustomViewBounds;
++                settings.minimumView = current.minimumView;
++                settings.maximumView = current.maximumView;
++                settings.panSpeed = current.panSpeed;
++                settings.zoomStep = current.zoomStep;
++                settings.keyboardZoomSpeed = current.keyboardZoomSpeed;
++                settings.closestDistance = current.closestDistance;
++                settings.farthestDistance = current.farthestDistance;
++                settings.followDistance = current.followDistance;
++                settings.smoothTime = current.smoothTime;
++                settings.farZoomPanRadius = current.farZoomPanRadius;
++                SessionState.SetString(Key, JsonUtility.ToJson(settings));
++            }
++        }
++        else if (state == PlayModeStateChange.EnteredEditMode)
++            EditorApplication.delayCall += ApplySavedSettings;
++    }
++
++    private static Settings Capture(CommunityCamera camera)
++    {
++        SerializedObject source = new SerializedObject(camera);
++        Transform minimum = source.FindProperty("minimumCorner").objectReferenceValue as Transform;
++        Transform maximum = source.FindProperty("maximumCorner").objectReferenceValue as Transform;
++        return new Settings
++        {
++            scenePath = camera.gameObject.scene.path,
++            position = camera.ViewTransform.localPosition,
++            rotation = camera.ViewTransform.localEulerAngles,
++            fieldOfView = camera.FieldOfView,
++            minimum = minimum != null ? minimum.position : Vector3.zero,
++            maximum = maximum != null ? maximum.position : Vector3.zero,
++            useAdditionalPositionLimits = source.FindProperty("useAdditionalPositionLimits").boolValue,
++            useCustomViewBounds = source.FindProperty("useCustomViewBounds").boolValue,
++            minimumView = source.FindProperty("minimumView").vector2Value,
++            maximumView = source.FindProperty("maximumView").vector2Value,
++            panSpeed = source.FindProperty("panSpeed").floatValue,
++            zoomStep = source.FindProperty("zoomStep").floatValue,
++            keyboardZoomSpeed = source.FindProperty("keyboardZoomSpeed").floatValue,
++            closestDistance = source.FindProperty("closestDistance").floatValue,
++            farthestDistance = source.FindProperty("farthestDistance").floatValue,
++            followDistance = source.FindProperty("followDistance").floatValue,
++            smoothTime = source.FindProperty("smoothTime").floatValue,
++            farZoomPanRadius = source.FindProperty("farZoomPanRadius").floatValue
++        };
++    }
++
++    private static Settings Read()
++    {
++        string data = SessionState.GetString(Key, "");
++        return string.IsNullOrEmpty(data) ? null : JsonUtility.FromJson<Settings>(data);
++    }
++
++    private static CommunityCamera FindCamera(string scenePath)
++    {
++        foreach (CommunityCamera camera in UnityEngine.Object.FindObjectsByType<CommunityCamera>(
++            FindObjectsInactive.Include, FindObjectsSortMode.None))
++            if (camera.gameObject.scene.path == scenePath) return camera;
++        return null;
++    }
++
++    private static void ApplySavedSettings()
++    {
++        Settings settings = Read();
++        if (settings == null || !settings.changed)
++        {
++            SessionState.EraseString(Key);
++            return;
++        }
++
++        Scene scene = SceneManager.GetActiveScene();
++        CommunityCamera camera = scene.path == settings.scenePath ? FindCamera(scene.path) : null;
++        if (camera == null) return;
++
++        camera.ViewTransform.localPosition = settings.position;
++        camera.ViewTransform.localEulerAngles = settings.rotation;
++        camera.FieldOfView = settings.fieldOfView;
++
++        SerializedObject destination = new SerializedObject(camera);
++        Transform minimum = destination.FindProperty("minimumCorner").objectReferenceValue as Transform;
++        Transform maximum = destination.FindProperty("maximumCorner").objectReferenceValue as Transform;
++        if (minimum != null) minimum.position = settings.minimum;
++        if (maximum != null) maximum.position = settings.maximum;
++        destination.FindProperty("useAdditionalPositionLimits").boolValue = settings.useAdditionalPositionLimits;
++        destination.FindProperty("useCustomViewBounds").boolValue = settings.useCustomViewBounds;
++        destination.FindProperty("minimumView").vector2Value = settings.minimumView;
++        destination.FindProperty("maximumView").vector2Value = settings.maximumView;
++        destination.FindProperty("panSpeed").floatValue = settings.panSpeed;
++        destination.FindProperty("zoomStep").floatValue = settings.zoomStep;
++        destination.FindProperty("keyboardZoomSpeed").floatValue = settings.keyboardZoomSpeed;
++        destination.FindProperty("closestDistance").floatValue = settings.closestDistance;
++        destination.FindProperty("farthestDistance").floatValue = settings.farthestDistance;
++        destination.FindProperty("followDistance").floatValue = settings.followDistance;
++        destination.FindProperty("smoothTime").floatValue = settings.smoothTime;
++        destination.FindProperty("farZoomPanRadius").floatValue = settings.farZoomPanRadius;
++        destination.ApplyModifiedPropertiesWithoutUndo();
++
++        EditorSceneManager.MarkSceneDirty(scene);
++        if (EditorSceneManager.SaveScene(scene)) SessionState.EraseString(Key);
++    }
++}
+diff --git a/Assets/Editor/CommunityCameraPlaySave.cs.meta b/Assets/Editor/CommunityCameraPlaySave.cs.meta
+new file mode 100644
+index 0000000..2ca73c9
+--- /dev/null
++++ b/Assets/Editor/CommunityCameraPlaySave.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 5dd49074ef0203e42a70fc1257550010
+\ No newline at end of file
+diff --git a/Assets/Scenes/PrototypeLayout.unity b/Assets/Scenes/PrototypeLayout.unity
+index 3ef406b..4647376 100644
+--- a/Assets/Scenes/PrototypeLayout.unity
++++ b/Assets/Scenes/PrototypeLayout.unity
+@@ -2415,7 +2415,7 @@ Transform:
+   m_GameObject: {fileID: 149283980}
+   serializedVersion: 2
+   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+-  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalPosition: {x: -6.8, y: 0, z: 1}
+   m_LocalScale: {x: 1, y: 1, z: 1}
+   m_ConstrainProportionsScale: 0
+   m_Children:
+@@ -3039,6 +3039,9 @@ RectTransform:
+   - {fileID: 1766009997}
+   - {fileID: 338946675}
+   - {fileID: 1404327610}
++  - {fileID: 3000000105}
++  - {fileID: 3000000211}
++  - {fileID: 3000000221}
+   - {fileID: 1646351543}
+   m_Father: {fileID: 0}
+   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+@@ -5718,7 +5721,6 @@ MonoBehaviour:
+   group: {fileID: 338946677}
+   marker: {fileID: 753166368}
+   greenTarget: {fileID: 1655457339}
+-  title: {fileID: 55004772}
+   markerCrossingDuration: 2
+   edgePadding: 8
+   rounds: 3
+@@ -8259,6 +8261,11 @@ MonoBehaviour:
+   merchant: {fileID: 1019913513}
+   dayEvents: {fileID: 1188192333}
+   gatheringGame: {fileID: 338946676}
++  communityCamera: {fileID: 3000000113}
++  forestVisitButton: {fileID: 3000000214}
++  forestVisitLabel: {fileID: 3000000218}
++  fishingVisitButton: {fileID: 3000000224}
++  fishingVisitLabel: {fileID: 3000000228}
+   foodPreparationPanel: {fileID: 1404327611}
+   inventoryTrading: {fileID: 1105058367}
+   foodPreparationDestination: {fileID: 1545097740}
+@@ -8268,10 +8275,14 @@ MonoBehaviour:
+   - {fileID: 299139912}
+   forestDestination: {fileID: 146932249}
+   fishingDestination: {fileID: 1310951702}
++  villageExit: {fileID: 3000000058}
++  fencePassage: {fileID: 3000000060}
+   woodReward: 2
+   movementDuration: 5
++  outsideMovementDuration: 7
+   plowWorkDuration: 8
+   movementEase: 4
++  arrivalStillTime: 0.2
+ --- !u!4 &467295184
+ Transform:
+   m_ObjectHideFlags: 0
+@@ -11489,6 +11500,9 @@ Transform:
+   - {fileID: 1644697510}
+   - {fileID: 1290718096}
+   - {fileID: 1019913512}
++  - {fileID: 3000000001}
++  - {fileID: 3000000101}
++  - {fileID: 3000000103}
+   m_Father: {fileID: 0}
+   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+ --- !u!1 &608130554
+@@ -14295,6 +14309,9 @@ GameObject:
+   - component: {fileID: 720193305}
+   - component: {fileID: 720193304}
+   - component: {fileID: 720193307}
++  - component: {fileID: 3000000113}
++  - component: {fileID: 3000000114}
++  - component: {fileID: 3000000206}
+   m_Layer: 0
+   m_Name: Main Camera
+   m_TagString: MainCamera
+@@ -14343,7 +14360,7 @@ Camera:
+     height: 1
+   near clip plane: 0.3
+   far clip plane: 1000
+-  field of view: 42
++  field of view: 50
+   orthographic: 0
+   orthographic size: 5
+   m_Depth: 0
+@@ -14369,13 +14386,13 @@ Transform:
+   m_PrefabAsset: {fileID: 0}
+   m_GameObject: {fileID: 720193303}
+   serializedVersion: 2
+-  m_LocalRotation: {x: 0.42272198, y: 0, z: 0, w: 0.9062594}
+-  m_LocalPosition: {x: 0, y: 15.5, z: -13}
++  m_LocalRotation: {x: 0.34611705, y: 0, z: 0, w: 0.93819135}
++  m_LocalPosition: {x: -0.7, y: 9.592348, z: -8.983149}
+   m_LocalScale: {x: 1, y: 1, z: 1}
+   m_ConstrainProportionsScale: 0
+   m_Children: []
+   m_Father: {fileID: 0}
+-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_LocalEulerAnglesHint: {x: 44.465, y: 0, z: 0}
+ --- !u!114 &720193307
+ MonoBehaviour:
+   m_ObjectHideFlags: 0
+@@ -33766,7 +33783,7 @@ Transform:
+   m_GameObject: {fileID: 1644697509}
+   serializedVersion: 2
+   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+-  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalPosition: {x: -6.37, y: 0, z: 0}
+   m_LocalScale: {x: 1, y: 1, z: 1}
+   m_ConstrainProportionsScale: 0
+   m_Children:
+@@ -33968,7 +33985,6 @@ MonoBehaviour:
+   ordersPage: {fileID: 1096999667}
+   buyTab: {fileID: 276919783}
+   sellTab: {fileID: 1698138339}
+-  ordersTab: {fileID: 1169045828}
+   sellPanel: {fileID: 1308473479}
+ --- !u!1 &1649880789
+ GameObject:
+@@ -45373,11 +45389,2269 @@ CanvasRenderer:
+   m_PrefabAsset: {fileID: 0}
+   m_GameObject: {fileID: 2145844234}
+   m_CullTransparentMesh: 1
++--- !u!1 &3000000000
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000001}
++  m_Layer: 0
++  m_Name: Cerca oeste e caminhos
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000001
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000000}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children:
++  - {fileID: 3000000003}
++  - {fileID: 3000000008}
++  - {fileID: 3000000013}
++  - {fileID: 3000000018}
++  - {fileID: 3000000023}
++  - {fileID: 3000000028}
++  - {fileID: 3000000033}
++  - {fileID: 3000000038}
++  - {fileID: 3000000043}
++  - {fileID: 3000000048}
++  - {fileID: 3000000053}
++  - {fileID: 3000000058}
++  - {fileID: 3000000060}
++  m_Father: {fileID: 604559501}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!1 &3000000002
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000003}
++  - component: {fileID: 3000000004}
++  - component: {fileID: 3000000005}
++  - component: {fileID: 3000000006}
++  m_Layer: 0
++  m_Name: Solo externo
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000003
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000002}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: -11.5, y: -0.35, z: 0}
++  m_LocalScale: {x: 5.5, y: 0.5, z: 9}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000004
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000002}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000005
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000002}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000006
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000002}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 8111d175e31f8d94391f2007b3b28d25, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000007
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000008}
++  - component: {fileID: 3000000009}
++  - component: {fileID: 3000000010}
++  - component: {fileID: 3000000011}
++  m_Layer: 0
++  m_Name: Trilha interna ate a passagem
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000008
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000007}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: -2, y: 0.015, z: 1.3}
++  m_LocalScale: {x: 13.4, y: 0.03, z: 0.36}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000009
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000007}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000010
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000007}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000011
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000007}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: f5240e0eec323d449abc9d04ec20f644, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000012
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000013}
++  - component: {fileID: 3000000014}
++  - component: {fileID: 3000000015}
++  - component: {fileID: 3000000016}
++  m_Layer: 0
++  m_Name: Trilha externa
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000013
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000012}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: -11, y: 0.015, z: 1.3}
++  m_LocalScale: {x: 4.8, y: 0.03, z: 0.36}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000014
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000012}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000015
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000012}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000016
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000012}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: f5240e0eec323d449abc9d04ec20f644, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000017
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000018}
++  - component: {fileID: 3000000019}
++  - component: {fileID: 3000000020}
++  - component: {fileID: 3000000021}
++  m_Layer: 0
++  m_Name: Poste da cerca -4.3
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000018
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000017}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.52, z: -4.3}
++  m_LocalScale: {x: 0.15, y: 1.04, z: 0.15}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000019
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000017}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000020
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000017}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000021
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000017}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000022
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000023}
++  - component: {fileID: 3000000024}
++  - component: {fileID: 3000000025}
++  - component: {fileID: 3000000026}
++  m_Layer: 0
++  m_Name: Poste da cerca 0.7
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000023
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000022}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.52, z: 0.7}
++  m_LocalScale: {x: 0.15, y: 1.04, z: 0.15}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000024
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000022}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000025
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000022}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000026
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000022}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000027
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000028}
++  - component: {fileID: 3000000029}
++  - component: {fileID: 3000000030}
++  - component: {fileID: 3000000031}
++  m_Layer: 0
++  m_Name: Poste da cerca 1.9
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000028
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000027}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.52, z: 1.9}
++  m_LocalScale: {x: 0.15, y: 1.04, z: 0.15}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000029
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000027}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000030
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000027}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000031
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000027}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000032
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000033}
++  - component: {fileID: 3000000034}
++  - component: {fileID: 3000000035}
++  - component: {fileID: 3000000036}
++  m_Layer: 0
++  m_Name: Poste da cerca 4.3
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000033
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000032}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.52, z: 4.3}
++  m_LocalScale: {x: 0.15, y: 1.04, z: 0.15}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000034
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000032}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000035
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000032}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000036
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000032}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000037
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000038}
++  - component: {fileID: 3000000039}
++  - component: {fileID: 3000000040}
++  - component: {fileID: 3000000041}
++  m_Layer: 0
++  m_Name: Trave da cerca -1.8 0.43
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000038
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000037}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.43, z: -1.8}
++  m_LocalScale: {x: 0.11, y: 0.1, z: 5}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000039
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000037}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000040
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000037}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000041
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000037}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000042
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000043}
++  - component: {fileID: 3000000044}
++  - component: {fileID: 3000000045}
++  - component: {fileID: 3000000046}
++  m_Layer: 0
++  m_Name: Trave da cerca -1.8 0.79
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000043
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000042}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.79, z: -1.8}
++  m_LocalScale: {x: 0.11, y: 0.1, z: 5}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000044
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000042}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000045
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000042}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000046
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000042}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000047
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000048}
++  - component: {fileID: 3000000049}
++  - component: {fileID: 3000000050}
++  - component: {fileID: 3000000051}
++  m_Layer: 0
++  m_Name: Trave da cerca 3.1 0.43
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000048
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000047}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.43, z: 3.1}
++  m_LocalScale: {x: 0.11, y: 0.1, z: 2.4}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000049
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000047}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000050
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000047}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000051
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000047}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000052
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000053}
++  - component: {fileID: 3000000054}
++  - component: {fileID: 3000000055}
++  - component: {fileID: 3000000056}
++  m_Layer: 0
++  m_Name: Trave da cerca 3.1 0.79
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000053
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000052}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0.79, z: 3.1}
++  m_LocalScale: {x: 0.11, y: 0.1, z: 2.4}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!33 &3000000054
++MeshFilter:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000052}
++  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
++--- !u!65 &3000000055
++BoxCollider:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000052}
++  m_Material: {fileID: 0}
++  m_IncludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_ExcludeLayers:
++    serializedVersion: 2
++    m_Bits: 0
++  m_LayerOverridePriority: 0
++  m_IsTrigger: 0
++  m_ProvidesContacts: 0
++  m_Enabled: 1
++  serializedVersion: 3
++  m_Size: {x: 1, y: 1, z: 1}
++  m_Center: {x: 0, y: 0, z: 0}
++--- !u!23 &3000000056
++MeshRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000052}
++  m_Enabled: 1
++  m_CastShadows: 1
++  m_ReceiveShadows: 1
++  m_DynamicOccludee: 1
++  m_StaticShadowCaster: 0
++  m_MotionVectors: 1
++  m_LightProbeUsage: 1
++  m_ReflectionProbeUsage: 1
++  m_RayTracingMode: 2
++  m_RayTraceProcedural: 0
++  m_RayTracingAccelStructBuildFlagsOverride: 0
++  m_RayTracingAccelStructBuildFlags: 1
++  m_SmallMeshCulling: 1
++  m_ForceMeshLod: -1
++  m_MeshLodSelectionBias: 0
++  m_RenderingLayerMask: 1
++  m_RendererPriority: 0
++  m_Materials:
++  - {fileID: 2100000, guid: 57f4bb9914e0a4240bbdd72d04b58e1e, type: 2}
++  m_StaticBatchInfo:
++    firstSubMesh: 0
++    subMeshCount: 0
++  m_StaticBatchRoot: {fileID: 0}
++  m_ProbeAnchor: {fileID: 0}
++  m_LightProbeVolumeOverride: {fileID: 0}
++  m_ScaleInLightmap: 1
++  m_ReceiveGI: 1
++  m_PreserveUVs: 1
++  m_IgnoreNormalsForChartDetection: 0
++  m_ImportantGI: 0
++  m_StitchLightmapSeams: 1
++  m_SelectedEditorRenderState: 3
++  m_MinimumChartSize: 4
++  m_AutoUVMaxDistance: 0.5
++  m_AutoUVMaxAngle: 89
++  m_LightmapParameters: {fileID: 0}
++  m_GlobalIlluminationMeshLod: 0
++  m_SortingLayerID: 0
++  m_SortingLayer: 0
++  m_SortingOrder: 0
++  m_MaskInteraction: 0
++  m_AdditionalVertexStreams: {fileID: 0}
++--- !u!1 &3000000057
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000058}
++  m_Layer: 0
++  m_Name: Saida da comunidade
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000058
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000057}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: 5.8, y: 0, z: 1.3}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!1 &3000000059
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000060}
++  m_Layer: 0
++  m_Name: Passagem da cerca
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000060
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000059}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: -8.65, y: 0, z: 1.3}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000001}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!1 &3000000100
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000101}
++  m_Layer: 0
++  m_Name: Limite camera - minimo
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000101
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000100}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: -5.81, y: 0, z: -9}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 604559501}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!1 &3000000102
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000103}
++  m_Layer: 0
++  m_Name: Limite camera - maximo
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000103
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000102}
++  serializedVersion: 2
++  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
++  m_LocalPosition: {x: 6, y: 0, z: -0.53}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 604559501}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++--- !u!1 &3000000104
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000105}
++  - component: {fileID: 3000000106}
++  - component: {fileID: 3000000107}
++  - component: {fileID: 3000000108}
++  m_Layer: 0
++  m_Name: Botao Comunidade
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!224 &3000000105
++RectTransform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000104}
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children:
++  - {fileID: 3000000110}
++  m_Father: {fileID: 188939416}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_AnchorMin: {x: 1, y: 0}
++  m_AnchorMax: {x: 1, y: 0}
++  m_AnchoredPosition: {x: -18, y: 18}
++  m_SizeDelta: {x: 125, y: 42}
++  m_Pivot: {x: 1, y: 0}
++--- !u!222 &3000000106
++CanvasRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000104}
++  m_CullTransparentMesh: 1
++--- !u!114 &3000000107
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000104}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
++  m_Material: {fileID: 0}
++  m_Color: {r: 0.73, g: 0.83, b: 0.65, a: 1}
++  m_RaycastTarget: 1
++  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
++  m_Maskable: 1
++  m_OnCullStateChanged:
++    m_PersistentCalls:
++      m_Calls: []
++  m_Sprite: {fileID: 0}
++  m_Type: 0
++  m_PreserveAspect: 0
++  m_FillCenter: 1
++  m_FillMethod: 4
++  m_FillAmount: 1
++  m_FillClockwise: 1
++  m_FillOrigin: 0
++  m_UseSpriteMesh: 0
++  m_PixelsPerUnitMultiplier: 1
++--- !u!114 &3000000108
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000104}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
++  m_Navigation:
++    m_Mode: 3
++    m_WrapAround: 0
++    m_SelectOnUp: {fileID: 0}
++    m_SelectOnDown: {fileID: 0}
++    m_SelectOnLeft: {fileID: 0}
++    m_SelectOnRight: {fileID: 0}
++  m_Transition: 1
++  m_Colors:
++    m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
++    m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
++    m_PressedColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
++    m_SelectedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
++    m_DisabledColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 0.5019608}
++    m_ColorMultiplier: 1
++    m_FadeDuration: 0.1
++  m_SpriteState:
++    m_HighlightedSprite: {fileID: 0}
++    m_PressedSprite: {fileID: 0}
++    m_SelectedSprite: {fileID: 0}
++    m_DisabledSprite: {fileID: 0}
++  m_AnimationTriggers:
++    m_NormalTrigger: Normal
++    m_HighlightedTrigger: Highlighted
++    m_PressedTrigger: Pressed
++    m_SelectedTrigger: Selected
++    m_DisabledTrigger: Disabled
++  m_Interactable: 1
++  m_TargetGraphic: {fileID: 3000000107}
++  m_OnClick:
++    m_PersistentCalls:
++      m_Calls: []
++--- !u!1 &3000000109
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000110}
++  - component: {fileID: 3000000111}
++  - component: {fileID: 3000000112}
++  m_Layer: 0
++  m_Name: Rotulo Comunidade
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!224 &3000000110
++RectTransform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000109}
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000105}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_AnchorMin: {x: 0, y: 0}
++  m_AnchorMax: {x: 1, y: 1}
++  m_AnchoredPosition: {x: 0, y: 0}
++  m_SizeDelta: {x: -8, y: -6}
++  m_Pivot: {x: 0.5, y: 0.5}
++--- !u!222 &3000000111
++CanvasRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000109}
++  m_CullTransparentMesh: 1
++--- !u!114 &3000000112
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000109}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
++  m_Material: {fileID: 0}
++  m_Color: {r: 0.16, g: 0.13, b: 0.1, a: 1}
++  m_RaycastTarget: 0
++  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
++  m_Maskable: 1
++  m_OnCullStateChanged:
++    m_PersistentCalls:
++      m_Calls: []
++  m_FontData:
++    m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
++    m_FontSize: 10
++    m_FontStyle: 1
++    m_BestFit: 0
++    m_MinSize: 10
++    m_MaxSize: 40
++    m_Alignment: 4
++    m_AlignByGeometry: 0
++    m_RichText: 1
++    m_HorizontalOverflow: 0
++    m_VerticalOverflow: 0
++    m_LineSpacing: 1
++  m_Text: COMUNIDADE
++--- !u!114 &3000000113
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 720193303}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 8e4f8a2a1a6e4a8091a9bb63a07ce275, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: Assembly-CSharp::CommunityCamera
++  communityShot: {fileID: 3000000202}
++  workerShot: {fileID: 3000000205}
++  brain: {fileID: 3000000206}
++  minimumCorner: {fileID: 3000000101}
++  maximumCorner: {fileID: 3000000103}
++  useAdditionalPositionLimits: 1
++  useCustomViewBounds: 0
++  minimumView: {x: 0, y: 0}
++  maximumView: {x: 0, y: 0}
++  communityButton: {fileID: 3000000108}
++  panSpeed: 6
++  zoomStep: 0.8
++  keyboardZoomSpeed: 4
++  closestDistance: 9
++  farthestDistance: 14.8
++  followDistance: 8.7
++  smoothTime: 0.35
++  farZoomPanRadius: 0
++--- !u!114 &3000000114
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 720193303}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.UniversalAdditionalCameraData
++  m_RenderShadows: 1
++  m_RequiresDepthTextureOption: 2
++  m_RequiresOpaqueTextureOption: 2
++  m_CameraType: 0
++  m_Cameras: []
++  m_RendererIndex: -1
++  m_VolumeLayerMask:
++    serializedVersion: 2
++    m_Bits: 1
++  m_VolumeTrigger: {fileID: 0}
++  m_VolumeFrameworkUpdateModeOption: 2
++  m_RenderPostProcessing: 0
++  m_Antialiasing: 0
++  m_AntialiasingQuality: 2
++  m_StopNaN: 0
++  m_Dithering: 0
++  m_ClearDepth: 1
++  m_AllowXRRendering: 1
++  m_AllowHDROutput: 1
++  m_UseScreenCoordOverride: 0
++  m_ScreenSizeOverride: {x: 0, y: 0, z: 0, w: 0}
++  m_ScreenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
++  m_RequiresDepthTexture: 0
++  m_RequiresColorTexture: 0
++  m_TaaSettings:
++    m_Quality: 3
++    m_FrameInfluence: 0.1
++    m_JitterScale: 1
++    m_MipBias: 0
++    m_VarianceClampScale: 0.9
++    m_ContrastAdaptiveSharpening: 0
++  m_Version: 2
++--- !u!1 &3000000210
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000211}
++  - component: {fileID: 3000000212}
++  - component: {fileID: 3000000213}
++  - component: {fileID: 3000000214}
++  m_Layer: 0
++  m_Name: Botao Floresta
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!224 &3000000211
++RectTransform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000210}
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children:
++  - {fileID: 3000000216}
++  m_Father: {fileID: 188939416}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_AnchorMin: {x: 0, y: 0.5}
++  m_AnchorMax: {x: 0, y: 0.5}
++  m_AnchoredPosition: {x: 18, y: 80}
++  m_SizeDelta: {x: 190, y: 42}
++  m_Pivot: {x: 0, y: 0.5}
++--- !u!222 &3000000212
++CanvasRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000210}
++  m_CullTransparentMesh: 1
++--- !u!114 &3000000213
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000210}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
++  m_Material: {fileID: 0}
++  m_Color: {r: 0.93, g: 0.77, b: 0.43, a: 1}
++  m_RaycastTarget: 1
++  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
++  m_Maskable: 1
++  m_OnCullStateChanged:
++    m_PersistentCalls:
++      m_Calls: []
++  m_Sprite: {fileID: 0}
++  m_Type: 0
++  m_PreserveAspect: 0
++  m_FillCenter: 1
++  m_FillMethod: 4
++  m_FillAmount: 1
++  m_FillClockwise: 1
++  m_FillOrigin: 0
++  m_UseSpriteMesh: 0
++  m_PixelsPerUnitMultiplier: 1
++--- !u!114 &3000000214
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000210}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
++  m_Navigation:
++    m_Mode: 3
++    m_WrapAround: 0
++    m_SelectOnUp: {fileID: 0}
++    m_SelectOnDown: {fileID: 0}
++    m_SelectOnLeft: {fileID: 0}
++    m_SelectOnRight: {fileID: 0}
++  m_Transition: 1
++  m_Colors:
++    m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
++    m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
++    m_PressedColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
++    m_SelectedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
++    m_DisabledColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 0.5019608}
++    m_ColorMultiplier: 1
++    m_FadeDuration: 0.1
++  m_SpriteState:
++    m_HighlightedSprite: {fileID: 0}
++    m_PressedSprite: {fileID: 0}
++    m_SelectedSprite: {fileID: 0}
++    m_DisabledSprite: {fileID: 0}
++  m_AnimationTriggers:
++    m_NormalTrigger: Normal
++    m_HighlightedTrigger: Highlighted
++    m_PressedTrigger: Pressed
++    m_SelectedTrigger: Selected
++    m_DisabledTrigger: Disabled
++  m_Interactable: 1
++  m_TargetGraphic: {fileID: 3000000213}
++  m_OnClick:
++    m_PersistentCalls:
++      m_Calls: []
++--- !u!1 &3000000215
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000216}
++  - component: {fileID: 3000000217}
++  - component: {fileID: 3000000218}
++  m_Layer: 0
++  m_Name: Rotulo Floresta
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!224 &3000000216
++RectTransform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000215}
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000211}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_AnchorMin: {x: 0, y: 0}
++  m_AnchorMax: {x: 1, y: 1}
++  m_AnchoredPosition: {x: 0, y: 0}
++  m_SizeDelta: {x: -8, y: -6}
++  m_Pivot: {x: 0.5, y: 0.5}
++--- !u!222 &3000000217
++CanvasRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000215}
++  m_CullTransparentMesh: 1
++--- !u!114 &3000000218
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000215}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
++  m_Material: {fileID: 0}
++  m_Color: {r: 0.16, g: 0.13, b: 0.1, a: 1}
++  m_RaycastTarget: 0
++  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
++  m_Maskable: 1
++  m_OnCullStateChanged:
++    m_PersistentCalls:
++      m_Calls: []
++  m_FontData:
++    m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
++    m_FontSize: 10
++    m_FontStyle: 1
++    m_BestFit: 0
++    m_MinSize: 10
++    m_MaxSize: 40
++    m_Alignment: 4
++    m_AlignByGeometry: 0
++    m_RichText: 1
++    m_HorizontalOverflow: 0
++    m_VerticalOverflow: 0
++    m_LineSpacing: 1
++  m_Text: FLORESTA
++--- !u!1 &3000000220
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000221}
++  - component: {fileID: 3000000222}
++  - component: {fileID: 3000000223}
++  - component: {fileID: 3000000224}
++  m_Layer: 0
++  m_Name: Botao Pesca
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!224 &3000000221
++RectTransform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000220}
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children:
++  - {fileID: 3000000226}
++  m_Father: {fileID: 188939416}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_AnchorMin: {x: 0, y: 0.5}
++  m_AnchorMax: {x: 0, y: 0.5}
++  m_AnchoredPosition: {x: 18, y: -80}
++  m_SizeDelta: {x: 190, y: 42}
++  m_Pivot: {x: 0, y: 0.5}
++--- !u!222 &3000000222
++CanvasRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000220}
++  m_CullTransparentMesh: 1
++--- !u!114 &3000000223
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000220}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
++  m_Material: {fileID: 0}
++  m_Color: {r: 0.58, g: 0.78, b: 0.9, a: 1}
++  m_RaycastTarget: 1
++  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
++  m_Maskable: 1
++  m_OnCullStateChanged:
++    m_PersistentCalls:
++      m_Calls: []
++  m_Sprite: {fileID: 0}
++  m_Type: 0
++  m_PreserveAspect: 0
++  m_FillCenter: 1
++  m_FillMethod: 4
++  m_FillAmount: 1
++  m_FillClockwise: 1
++  m_FillOrigin: 0
++  m_UseSpriteMesh: 0
++  m_PixelsPerUnitMultiplier: 1
++--- !u!114 &3000000224
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000220}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
++  m_Navigation:
++    m_Mode: 3
++    m_WrapAround: 0
++    m_SelectOnUp: {fileID: 0}
++    m_SelectOnDown: {fileID: 0}
++    m_SelectOnLeft: {fileID: 0}
++    m_SelectOnRight: {fileID: 0}
++  m_Transition: 1
++  m_Colors:
++    m_NormalColor: {r: 1, g: 1, b: 1, a: 1}
++    m_HighlightedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
++    m_PressedColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
++    m_SelectedColor: {r: 0.9607843, g: 0.9607843, b: 0.9607843, a: 1}
++    m_DisabledColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 0.5019608}
++    m_ColorMultiplier: 1
++    m_FadeDuration: 0.1
++  m_SpriteState:
++    m_HighlightedSprite: {fileID: 0}
++    m_PressedSprite: {fileID: 0}
++    m_SelectedSprite: {fileID: 0}
++    m_DisabledSprite: {fileID: 0}
++  m_AnimationTriggers:
++    m_NormalTrigger: Normal
++    m_HighlightedTrigger: Highlighted
++    m_PressedTrigger: Pressed
++    m_SelectedTrigger: Selected
++    m_DisabledTrigger: Disabled
++  m_Interactable: 1
++  m_TargetGraphic: {fileID: 3000000223}
++  m_OnClick:
++    m_PersistentCalls:
++      m_Calls: []
++--- !u!1 &3000000225
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000226}
++  - component: {fileID: 3000000227}
++  - component: {fileID: 3000000228}
++  m_Layer: 0
++  m_Name: Rotulo Pesca
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!224 &3000000226
++RectTransform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000225}
++  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
++  m_LocalPosition: {x: 0, y: 0, z: 0}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 3000000221}
++  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
++  m_AnchorMin: {x: 0, y: 0}
++  m_AnchorMax: {x: 1, y: 1}
++  m_AnchoredPosition: {x: 0, y: 0}
++  m_SizeDelta: {x: -8, y: -6}
++  m_Pivot: {x: 0.5, y: 0.5}
++--- !u!222 &3000000227
++CanvasRenderer:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000225}
++  m_CullTransparentMesh: 1
++--- !u!114 &3000000228
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000225}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
++  m_Name: 
++  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
++  m_Material: {fileID: 0}
++  m_Color: {r: 0.16, g: 0.13, b: 0.1, a: 1}
++  m_RaycastTarget: 0
++  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
++  m_Maskable: 1
++  m_OnCullStateChanged:
++    m_PersistentCalls:
++      m_Calls: []
++  m_FontData:
++    m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
++    m_FontSize: 10
++    m_FontStyle: 1
++    m_BestFit: 0
++    m_MinSize: 10
++    m_MaxSize: 40
++    m_Alignment: 4
++    m_AlignByGeometry: 0
++    m_RichText: 1
++    m_HorizontalOverflow: 0
++    m_VerticalOverflow: 0
++    m_LineSpacing: 1
++  m_Text: PESCA
++--- !u!1 &3000000200
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000201}
++  - component: {fileID: 3000000202}
++  m_Layer: 0
++  m_Name: Camera Comunidade
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000201
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000200}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0.34611705, y: 0, z: 0, w: 0.93819135}
++  m_LocalPosition: {x: -0.7, y: 9.592348, z: -8.983149}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 0}
++  m_LocalEulerAnglesHint: {x: 40.5, y: 0, z: 0}
++--- !u!114 &3000000202
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000200}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: f9dfa5b682dcd46bda6128250e975f58, type: 3}
++  m_Name:
++  m_EditorClassIdentifier:
++  Priority:
++    Enabled: 1
++    m_Value: 10
++  OutputChannel: 1
++  StandbyUpdate: 2
++  m_StreamingVersion: 20241001
++  m_LegacyPriority: 0
++  Target:
++    TrackingTarget: {fileID: 0}
++    LookAtTarget: {fileID: 0}
++    CustomLookAtTarget: 0
++  Lens:
++    FieldOfView: 50
++    OrthographicSize: 5
++    NearClipPlane: 0.3
++    FarClipPlane: 1000
++    Dutch: 0
++    ModeOverride: 0
++    PhysicalProperties:
++      GateFit: 2
++      SensorSize: {x: 36, y: 24}
++      LensShift: {x: 0, y: 0}
++      FocusDistance: 10
++      Iso: 200
++      ShutterSpeed: 0.005
++      Aperture: 16
++      BladeCount: 5
++      Curvature: {x: 2, y: 11}
++      BarrelClipping: 0.25
++      Anamorphism: 0
++  BlendHint: 0
++--- !u!1 &3000000203
++GameObject:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  serializedVersion: 6
++  m_Component:
++  - component: {fileID: 3000000204}
++  - component: {fileID: 3000000205}
++  m_Layer: 0
++  m_Name: Camera Trabalhador
++  m_TagString: Untagged
++  m_Icon: {fileID: 0}
++  m_NavMeshLayer: 0
++  m_StaticEditorFlags: 0
++  m_IsActive: 1
++--- !u!4 &3000000204
++Transform:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000203}
++  serializedVersion: 2
++  m_LocalRotation: {x: 0.34611705, y: 0, z: 0, w: 0.93819135}
++  m_LocalPosition: {x: -0.7, y: 9.592348, z: -8.983149}
++  m_LocalScale: {x: 1, y: 1, z: 1}
++  m_ConstrainProportionsScale: 0
++  m_Children: []
++  m_Father: {fileID: 0}
++  m_LocalEulerAnglesHint: {x: 40.5, y: 0, z: 0}
++--- !u!114 &3000000205
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 3000000203}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: f9dfa5b682dcd46bda6128250e975f58, type: 3}
++  m_Name:
++  m_EditorClassIdentifier:
++  Priority:
++    Enabled: 1
++    m_Value: 0
++  OutputChannel: 1
++  StandbyUpdate: 2
++  m_StreamingVersion: 20241001
++  m_LegacyPriority: 0
++  Target:
++    TrackingTarget: {fileID: 0}
++    LookAtTarget: {fileID: 0}
++    CustomLookAtTarget: 0
++  Lens:
++    FieldOfView: 42
++    OrthographicSize: 5
++    NearClipPlane: 0.3
++    FarClipPlane: 1000
++    Dutch: 0
++    ModeOverride: 0
++    PhysicalProperties:
++      GateFit: 2
++      SensorSize: {x: 36, y: 24}
++      LensShift: {x: 0, y: 0}
++      FocusDistance: 10
++      Iso: 200
++      ShutterSpeed: 0.005
++      Aperture: 16
++      BladeCount: 5
++      Curvature: {x: 2, y: 11}
++      BarrelClipping: 0.25
++      Anamorphism: 0
++  BlendHint: 0
++--- !u!114 &3000000206
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 720193303}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 72ece51f2901e7445ab60da3685d6b5f, type: 3}
++  m_Name:
++  m_EditorClassIdentifier:
++  ShowDebugText: 0
++  ShowCameraFrustum: 1
++  IgnoreTimeScale: 0
++  WorldUpOverride: {fileID: 0}
++  ChannelMask: -1
++  UpdateMethod: 2
++  BlendUpdateMethod: 1
++  LensModeOverride:
++    Enabled: 0
++    DefaultMode: 2
++  DefaultBlend:
++    Style: 1
++    Time: 1.1
++    CustomCurve:
++      serializedVersion: 2
++      m_Curve: []
++      m_PreInfinity: 2
++      m_PostInfinity: 2
++      m_RotationOrder: 4
++  CustomBlends: {fileID: 0}
+ --- !u!1660057539 &9223372036854775807
+ SceneRoots:
+   m_ObjectHideFlags: 0
+   m_Roots:
+   - {fileID: 720193306}
++  - {fileID: 3000000201}
++  - {fileID: 3000000204}
+   - {fileID: 1026542194}
+   - {fileID: 604559501}
+   - {fileID: 188939416}
+diff --git a/Assets/Scripts/Gameplay/ActionResolver.cs b/Assets/Scripts/Gameplay/ActionResolver.cs
+index 3d521b5..ff2d645 100644
+--- a/Assets/Scripts/Gameplay/ActionResolver.cs
++++ b/Assets/Scripts/Gameplay/ActionResolver.cs
+@@ -1,5 +1,6 @@
+ using DG.Tweening;
+ using UnityEngine;
++using UnityEngine.UI;
+ 
+ public sealed class ActionResolver : MonoBehaviour
+ {
+@@ -10,6 +11,11 @@ public sealed class ActionResolver : MonoBehaviour
+     [SerializeField] private SeedMerchant merchant;
+     [SerializeField] private DayEventController dayEvents;
+     [SerializeField] private GatheringMinigame gatheringGame;
++    [SerializeField] private CommunityCamera communityCamera;
++    [SerializeField] private Button forestVisitButton;
++    [SerializeField] private Text forestVisitLabel;
++    [SerializeField] private Button fishingVisitButton;
++    [SerializeField] private Text fishingVisitLabel;
+     [SerializeField] private FoodPreparationPanel foodPreparationPanel;
+     [SerializeField] private InventoryTrading inventoryTrading;
+     [SerializeField] private Transform foodPreparationDestination;
+@@ -17,18 +23,49 @@ public sealed class ActionResolver : MonoBehaviour
+     [SerializeField] private WorkerAssignment[] workers;
+     [SerializeField] private Transform forestDestination;
+     [SerializeField] private Transform fishingDestination;
++    [SerializeField] private Transform villageExit;
++    [SerializeField] private Transform fencePassage;
+     [SerializeField, Min(0)] private int woodReward = 2;
+     [SerializeField, Min(0.01f)] private float movementDuration = 0.7f;
++    [SerializeField, Min(0.01f)] private float outsideMovementDuration = 7f;
+     [SerializeField, Min(0.01f)] private float plowWorkDuration = 1f;
+     [SerializeField] private Ease movementEase = Ease.InOutSine;
++    [SerializeField, Min(0f)] private float arrivalStillTime = 0.2f;
++
++    private sealed class GatheringTask
++    {
++        public readonly ActivityKind Activity;
++        public readonly Transform Destination;
++        public readonly Button Button;
++        public readonly Text Label;
++        public WorkerAssignment Worker;
++        public bool Arrived;
++        public bool Started;
++        public float StillTime;
++        public Vector3 LastPosition;
++
++        public GatheringTask(ActivityKind activity, Transform destination, Button button, Text label)
++        {
++            Activity = activity;
++            Destination = destination;
++            Button = button;
++            Label = label;
++        }
++    }
+ 
+     private WorkerAssignment pendingPlotWorker;
+     private ActivityKind pendingPlotAction;
+     private int busyWorkers;
+     private WorkerAssignment pendingFoodWorker;
+-    private WorkerAssignment gatheringWorker;
++    private GatheringTask forestTask;
++    private GatheringTask fishingTask;
++    private GatheringTask activeMinigame;
+ 
+-    public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null;
++    public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null ||
++        forestTask?.Worker != null || fishingTask?.Worker != null;
++    public bool GatheringNeedsPlayer =>
++        (forestTask?.Worker != null && forestTask.Arrived && !forestTask.Started) ||
++        (fishingTask?.Worker != null && fishingTask.Arrived && !fishingTask.Started);
+     public int WoodGainedToday { get; private set; }
+     public int FoodGainedToday { get; private set; }
+     public int FishGainedToday { get; private set; }
+@@ -36,6 +73,38 @@ public sealed class ActionResolver : MonoBehaviour
+     public int PlotsPlowedToday { get; private set; }
+     public int CropsHarvestedToday { get; private set; }
+ 
++    private void Start()
++    {
++        forestTask = new GatheringTask(ActivityKind.CollectWood, forestDestination,
++            forestVisitButton, forestVisitLabel);
++        fishingTask = new GatheringTask(ActivityKind.Fish, fishingDestination,
++            fishingVisitButton, fishingVisitLabel);
++        if (forestVisitButton != null)
++        {
++            forestVisitButton.onClick.AddListener(VisitForestWorker);
++            forestVisitButton.gameObject.SetActive(false);
++        }
++        if (fishingVisitButton != null)
++        {
++            fishingVisitButton.onClick.AddListener(VisitFishingWorker);
++            fishingVisitButton.gameObject.SetActive(false);
++        }
++    }
++
++    private void OnDestroy()
++    {
++        if (forestVisitButton != null)
++            forestVisitButton.onClick.RemoveListener(VisitForestWorker);
++        if (fishingVisitButton != null)
++            fishingVisitButton.onClick.RemoveListener(VisitFishingWorker);
++    }
++
++    private void Update()
++    {
++        UpdateGathering(forestTask);
++        UpdateGathering(fishingTask);
++    }
++
+     public void TryAssign(WorkerAssignment worker, ActivityKind activity, string activityName)
+     {
+         if (dayCycle == null || !dayCycle.CanAcceptActions)
+@@ -60,10 +129,11 @@ public sealed class ActionResolver : MonoBehaviour
+             feedback.ShowMessage("Esse trabalhador já agiu hoje.");
+             return;
+         }
+-        if ((activity == ActivityKind.CollectWood || activity == ActivityKind.Fish) &&
+-            gatheringGame != null && gatheringWorker != null)
++        GatheringTask task = activity == ActivityKind.CollectWood ? forestTask :
++            activity == ActivityKind.Fish ? fishingTask : null;
++        if (task != null && task.Worker != null)
+         {
+-            feedback.ShowMessage("Aguarde a atividade de coleta em andamento.");
++            feedback.ShowMessage("Já há um trabalhador nessa área de coleta.");
+             return;
+         }
+ 
+@@ -122,23 +192,28 @@ public sealed class ActionResolver : MonoBehaviour
+ 
+     private void StartGathering(WorkerAssignment worker, ActivityKind activity, string activityName)
+     {
+-        Transform destination = activity == ActivityKind.CollectWood ? forestDestination : fishingDestination;
+-        if (destination == null || resources == null)
++        GatheringTask task = activity == ActivityKind.CollectWood ? forestTask : fishingTask;
++        if (task == null || task.Destination == null || villageExit == null ||
++            fencePassage == null || resources == null)
+         {
+             feedback.ShowMessage("Destino ou recursos não configurados.");
+             return;
+         }
+-        if (gatheringGame == null || !gatheringGame.CanStart())
++        if (gatheringGame == null || !gatheringGame.CanStart() ||
++            communityCamera == null || task.Button == null)
+         {
+             feedback.ShowMessage("Minigame de coleta não configurado.");
+             return;
+         }
+ 
+-        gatheringWorker = worker;
++        task.Worker = worker;
++        task.Arrived = false;
++        task.Started = false;
++        task.StillTime = 0f;
+         worker.MarkUsed(activityName);
+-        feedback.ShowMessage(activityName + " em andamento.");
+-        MoveToGatheringGame(worker, destination.position, activity,
+-            rating => CompleteGathering(worker, activity, rating));
++        feedback.ShowMessage(activityName + " em andamento. Use o botão para acompanhar.");
++        UpdateVisitButton(task);
++        MoveToGatheringArea(task);
+     }
+ 
+     private void CompleteGathering(WorkerAssignment worker, ActivityKind activity, int rating)
+@@ -303,7 +378,6 @@ public sealed class ActionResolver : MonoBehaviour
+     {
+         WorkerAssignment worker = pendingPlotWorker;
+         pendingPlotWorker = null;
+-        pendingFoodWorker = null;
+         return worker;
+     }
+ 
+@@ -312,9 +386,13 @@ public sealed class ActionResolver : MonoBehaviour
+         pendingPlotWorker = null;
+         foreach (WorkerAssignment worker in workers)
+         {
+-            if (worker == null || Vector3.Distance(worker.transform.position, worker.HomePosition) < 0.01f)
++            if (worker == null || DOTween.IsTweening(worker.transform) ||
++                Vector3.Distance(worker.transform.position, worker.HomePosition) < 0.01f)
+                 continue;
+-            MoveWorker(worker, worker.HomePosition, null, false);
++            if (fencePassage != null && villageExit != null &&
++                worker.transform.position.x < fencePassage.position.x)
++                MoveAlongRoute(worker, new[] { fencePassage.position, villageExit.position, worker.HomePosition }, null, false);
++            else MoveWorker(worker, worker.HomePosition, null, false);
+         }
+     }
+ 
+@@ -368,20 +446,126 @@ public sealed class ActionResolver : MonoBehaviour
+         });
+     }
+ 
+-    private void MoveToGatheringGame(WorkerAssignment worker, Vector3 destination, ActivityKind activity,
+-        System.Action<int> onFinished)
++    private void MoveToGatheringArea(GatheringTask task)
+     {
++        WorkerAssignment worker = task.Worker;
+         worker.SetStatus("caminhando");
+-        MoveWorker(worker, destination, () =>
++        MoveAlongRoute(worker, new[] { villageExit.position, fencePassage.position,
++            task.Destination.position }, () =>
++        {
++            task.Arrived = true;
++            task.LastPosition = worker.transform.position;
++            task.StillTime = 0f;
++            worker.SetStatus("aguardando jogador");
++            UpdateVisitButton(task);
++        });
++    }
++
++    private void VisitForestWorker() => VisitGatheringWorker(forestTask);
++    private void VisitFishingWorker() => VisitGatheringWorker(fishingTask);
++
++    private void VisitGatheringWorker(GatheringTask task)
++    {
++        if (task?.Worker != null && activeMinigame == null)
++            communityCamera.Follow(task.Worker.transform);
++    }
++
++    private void UpdateGathering(GatheringTask task)
++    {
++        if (task?.Worker == null || task.Started) return;
++        if (task.Arrived)
++        {
++            Vector3 position = task.Worker.transform.position;
++            bool stopped = !DOTween.IsTweening(task.Worker.transform) &&
++                Vector3.Distance(position, task.Destination.position) < 0.03f &&
++                (position - task.LastPosition).sqrMagnitude < 0.000001f;
++            task.StillTime = stopped ? task.StillTime + Time.deltaTime : 0f;
++            task.LastPosition = position;
++        }
++        UpdateVisitButton(task);
++        if (task.Arrived && task.StillTime >= arrivalStillTime && activeMinigame == null &&
++            communityCamera.IsFollowing(task.Worker.transform) && communityCamera.IsFollowReady)
++            BeginGatheringGame(task);
++    }
++
++    private void UpdateVisitButton(GatheringTask task)
++    {
++        if (task?.Button == null) return;
++        bool visible = task.Worker != null && !task.Started && activeMinigame == null &&
++            !communityCamera.IsFollowing(task.Worker.transform);
++        if (task.Button.gameObject.activeSelf != visible)
++            task.Button.gameObject.SetActive(visible);
++        if (visible && task.Label != null)
++        {
++            string area = task.Activity == ActivityKind.CollectWood ? "FLORESTA" : "PESCA";
++            string action = task.Arrived && task.StillTime >= arrivalStillTime ? "INICIAR" : "ACOMPANHAR";
++            string label = area + " - " + action + "\n" + task.Worker.DisplayName;
++            if (task.Label.text != label) task.Label.text = label;
++        }
++    }
++
++    private void BeginGatheringGame(GatheringTask task)
++    {
++        WorkerAssignment worker = task.Worker;
++        ActivityKind activity = task.Activity;
++        task.Started = true;
++        activeMinigame = task;
++        communityCamera.SetFollowLocked(true);
++        UpdateVisitButton(forestTask);
++        UpdateVisitButton(fishingTask);
++        busyWorkers++;
++        worker.SetStatus("atividade interativa");
++        gatheringGame.Begin(activity, rating =>
++        {
++            busyWorkers--;
++            task.Worker = null;
++            task.Arrived = false;
++            task.Started = false;
++            activeMinigame = null;
++            communityCamera.SetFollowLocked(false);
++            communityCamera.ReturnToCommunity();
++            CompleteGathering(worker, activity, rating);
++            SendGatheringWorkerHome(worker);
++            UpdateVisitButton(forestTask);
++            UpdateVisitButton(fishingTask);
++        }, activity == ActivityKind.Fish && dayEvents != null ? dayEvents.FishingReduction : 0);
++    }
++
++    private void SendGatheringWorkerHome(WorkerAssignment worker)
++    {
++        int returnDay = dayCycle.CurrentDay;
++        worker.SetStatus("voltando para casa");
++        MoveAlongRoute(worker, new[] { fencePassage.position, villageExit.position,
++            worker.HomePosition }, () =>
++        {
++            if (dayCycle.CurrentDay == returnDay) worker.SetStatus("em casa");
++        }, false);
++    }
++
++    private void MoveAlongRoute(WorkerAssignment worker, Vector3[] points, System.Action onArrived, bool countAsBusy = true)
++    {
++        worker.transform.DOKill();
++        float distance = 0f;
++        Vector3 from = worker.transform.position;
++        foreach (Vector3 point in points)
+         {
+-            busyWorkers++;
+-            worker.SetStatus("atividade interativa");
+-            gatheringGame.Begin(activity, rating =>
+-            {
+-                busyWorkers--;
+-                if (gatheringWorker == worker) gatheringWorker = null;
+-                onFinished(rating);
+-            }, activity == ActivityKind.Fish && dayEvents != null ? dayEvents.FishingReduction : 0);
++            distance += Vector3.Distance(from, point);
++            from = point;
++        }
++        if (countAsBusy) busyWorkers++;
++        Sequence route = DOTween.Sequence();
++        from = worker.transform.position;
++        foreach (Vector3 point in points)
++        {
++            float duration = outsideMovementDuration * worker.MovementDurationMultiplier *
++                Vector3.Distance(from, point) / Mathf.Max(distance, 0.01f);
++            route.Append(worker.transform.DOMove(point, Mathf.Max(duration, 0.01f)).SetEase(Ease.Linear));
++            from = point;
++        }
++        route.OnComplete(() =>
++        {
++            if (countAsBusy) busyWorkers--;
++            onArrived?.Invoke();
+         });
+     }
+ }
+diff --git a/Assets/Scripts/Gameplay/DayCycle.cs b/Assets/Scripts/Gameplay/DayCycle.cs
+index acf1611..b44e592 100644
+--- a/Assets/Scripts/Gameplay/DayCycle.cs
++++ b/Assets/Scripts/Gameplay/DayCycle.cs
+@@ -51,7 +51,8 @@ public sealed class DayCycle : MonoBehaviour
+             return;
+         if (actions.IsBusy)
+         {
+-            feedback.ShowMessage("Aguarde o fim das ações.");
++            feedback.ShowMessage(actions.GatheringNeedsPlayer ?
++                "Inicie a coleta pendente pelo botão do trabalhador." : "Aguarde o fim das ações.");
+             return;
+         }
+ 
+@@ -71,7 +72,7 @@ public sealed class DayCycle : MonoBehaviour
+                 continue;
+             }
+ 
+-            int received = resources.ConsumeFood(Mathf.Min(foodPerWorker, resources.Food));
++            int received = resources.ConsumeFood(foodPerWorker);
+             if (received >= foodPerWorker)
+             {
+                 fullyFed++;
+diff --git a/Assets/Scripts/Gameplay/DayEventController.cs b/Assets/Scripts/Gameplay/DayEventController.cs
+index 0e7f461..25e3a8c 100644
+--- a/Assets/Scripts/Gameplay/DayEventController.cs
++++ b/Assets/Scripts/Gameplay/DayEventController.cs
+@@ -1,5 +1,4 @@
+ using UnityEngine;
+-using UnityEngine.UI;
+ 
+ public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre }
+ 
+diff --git a/Assets/Scripts/Gameplay/DeliveryMissionBoard.cs b/Assets/Scripts/Gameplay/DeliveryMissionBoard.cs
+index f2025ee..2d48027 100644
+--- a/Assets/Scripts/Gameplay/DeliveryMissionBoard.cs
++++ b/Assets/Scripts/Gameplay/DeliveryMissionBoard.cs
+@@ -221,7 +221,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
+     private void Refresh()
+     {
+         if (resources == null) return;
+-        if (activePanel != null) activePanel.Refresh(missions, currentDay, resources);
++        if (activePanel != null) activePanel.Refresh(missions, resources);
+         if (missions.Count == 0)
+         {
+             if (orderText != null) orderText.text = "Nenhum pedido disponível.\nNovas ofertas chegam com a barraca.";
+diff --git a/Assets/Scripts/Interaction/CommunityCamera.cs b/Assets/Scripts/Interaction/CommunityCamera.cs
+new file mode 100644
+index 0000000..caaaca5
+--- /dev/null
++++ b/Assets/Scripts/Interaction/CommunityCamera.cs
+@@ -0,0 +1,298 @@
++using Unity.Cinemachine;
++using UnityEngine;
++using UnityEngine.InputSystem;
++using UnityEngine.UI;
++
++[RequireComponent(typeof(Camera), typeof(CinemachineBrain))]
++public sealed class CommunityCamera : MonoBehaviour
++{
++    [SerializeField] private CinemachineCamera communityShot;
++    [SerializeField] private CinemachineCamera workerShot;
++    [SerializeField] private CinemachineBrain brain;
++    [SerializeField] private Transform minimumCorner;
++    [SerializeField] private Transform maximumCorner;
++    [SerializeField] private bool useAdditionalPositionLimits;
++    [SerializeField] private bool useCustomViewBounds;
++    [SerializeField] private Vector2 minimumView;
++    [SerializeField] private Vector2 maximumView;
++    [SerializeField] private Button communityButton;
++    [SerializeField, Min(0.1f)] private float panSpeed = 6f;
++    [SerializeField, Min(0.1f)] private float zoomStep = 0.8f;
++    [SerializeField, Min(0.1f)] private float keyboardZoomSpeed = 4f;
++    [SerializeField, Min(0.1f)] private float closestDistance = 7.5f;
++    [SerializeField, Min(0.1f)] private float farthestDistance = 16f;
++    [SerializeField, Min(0.1f)] private float followDistance = 8.7f;
++    [SerializeField, Min(0.01f)] private float smoothTime = 0.35f;
++    [SerializeField, Min(0f)] private float farZoomPanRadius = 2f;
++
++    private Transform followed;
++    private Vector3 manualFocus;
++    private Vector3 homeFocus;
++    private Vector3 homePosition;
++    private Vector3 velocity;
++    private Vector3 followVelocity;
++    private float manualDistance;
++    private float homeDistance;
++    private bool manualActive;
++    private bool followLocked;
++    private readonly Vector2[] outerView = new Vector2[4];
++    private readonly Vector2[] currentView = new Vector2[4];
++
++    public Transform ViewTransform => communityShot != null ? communityShot.transform : transform;
++    public CinemachineCamera CommunityShot => communityShot;
++    public float FieldOfView
++    {
++        get => communityShot != null ? communityShot.Lens.FieldOfView : GetComponent<Camera>().fieldOfView;
++        set
++        {
++            if (communityShot != null)
++            {
++                LensSettings lens = communityShot.Lens;
++                lens.FieldOfView = value;
++                communityShot.Lens = lens;
++            }
++            else GetComponent<Camera>().fieldOfView = value;
++        }
++    }
++    public bool IsFollowing(Transform worker) => followed == worker;
++    public bool IsFollowReady => followed != null && workerShot != null && brain != null &&
++        ReferenceEquals(brain.ActiveVirtualCamera, workerShot) && !brain.IsBlending &&
++        Vector3.Distance(workerShot.transform.position,
++            followed.position - workerShot.transform.forward * followDistance) < 0.03f;
++
++    private void Awake()
++    {
++        if (communityShot != null) communityShot.Priority.Value = 10;
++        if (workerShot != null) workerShot.Priority.Value = 0;
++        UseCurrentViewAsHome();
++        if (communityButton != null)
++            communityButton.onClick.AddListener(ReturnToCommunity);
++    }
++
++    public void UseCurrentViewAsHome()
++    {
++        Transform view = ViewTransform;
++        homePosition = view.position;
++        homeDistance = view.position.y / -view.forward.y;
++        homeFocus = view.position + view.forward * homeDistance;
++        manualDistance = homeDistance;
++        manualFocus = homeFocus;
++        manualActive = false;
++        followed = null;
++        followLocked = false;
++        velocity = Vector3.zero;
++        if (workerShot != null) workerShot.Priority.Value = 0;
++        if (communityButton != null)
++            communityButton.gameObject.SetActive(false);
++    }
++
++    private void OnDestroy()
++    {
++        if (communityButton != null) communityButton.onClick.RemoveListener(ReturnToCommunity);
++    }
++
++    private void Update()
++    {
++        Keyboard keyboard = Keyboard.current;
++        Vector2 movement = Vector2.zero;
++        float zoom = 0f;
++        if (keyboard != null)
++        {
++            movement.x = (keyboard.dKey.isPressed ? 1 : 0) - (keyboard.aKey.isPressed ? 1 : 0);
++            movement.y = (keyboard.wKey.isPressed ? 1 : 0) - (keyboard.sKey.isPressed ? 1 : 0);
++            zoom = ((keyboard.equalsKey.isPressed || keyboard.numpadPlusKey.isPressed ? 1 : 0) -
++                (keyboard.minusKey.isPressed || keyboard.numpadMinusKey.isPressed ? 1 : 0)) *
++                Time.deltaTime * keyboardZoomSpeed;
++        }
++        if (Mouse.current != null)
++        {
++            float scroll = Mouse.current.scroll.ReadValue().y;
++            if (scroll != 0) zoom += Mathf.Sign(scroll);
++        }
++
++        if (followed != null && followLocked) return;
++        if (followed != null && (movement != Vector2.zero || zoom != 0))
++        {
++            ReturnToCommunity();
++            return;
++        }
++        if (followed != null) return;
++        if (movement == Vector2.zero && zoom == 0) return;
++
++        manualActive = true;
++        manualFocus += new Vector3(movement.x, 0, movement.y).normalized * panSpeed * Time.deltaTime;
++        if (zoom != 0)
++            manualDistance = Mathf.Clamp(manualDistance - zoom * zoomStep,
++                closestDistance, farthestDistance);
++        ClampManualView();
++    }
++
++    private void LateUpdate()
++    {
++        if (followed != null && workerShot != null)
++        {
++            Transform shot = workerShot.transform;
++            Vector3 target = followed.position - shot.forward * followDistance;
++            shot.position = Vector3.SmoothDamp(shot.position, target, ref followVelocity, smoothTime);
++        }
++        if (!manualActive) return;
++        Transform view = ViewTransform;
++        Vector3 communityTarget = manualFocus - view.forward * manualDistance;
++        view.position = ClampPosition(Vector3.SmoothDamp(view.position,
++            communityTarget, ref velocity, smoothTime));
++    }
++
++    public void Follow(Transform worker)
++    {
++        if (worker == null || workerShot == null) return;
++        bool switchingWorker = followed != null;
++        followed = worker;
++        followLocked = false;
++        manualActive = false;
++        if (!switchingWorker)
++            workerShot.transform.position = worker.position - workerShot.transform.forward * followDistance;
++        followVelocity = Vector3.zero;
++        workerShot.Priority.Value = 20;
++        if (communityButton != null) communityButton.gameObject.SetActive(true);
++    }
++
++    public void ReturnToCommunity()
++    {
++        if (followed == null || followLocked) return;
++        followed = null;
++        manualActive = false;
++        manualFocus = homeFocus;
++        manualDistance = homeDistance;
++        ViewTransform.position = homePosition;
++        if (workerShot != null) workerShot.Priority.Value = 0;
++        if (communityButton != null) communityButton.gameObject.SetActive(false);
++    }
++
++    public void SetFollowLocked(bool locked)
++    {
++        followLocked = locked;
++        if (communityButton != null)
++            communityButton.gameObject.SetActive(followed != null && !locked);
++    }
++
++    private void ClampManualView()
++    {
++        Vector3 forward = ViewTransform.forward;
++        Vector3 position = manualFocus - forward * manualDistance;
++        manualFocus = ClampPosition(position) + forward * manualDistance;
++    }
++
++    private Vector3 ClampPosition(Vector3 position)
++    {
++        if (!GetViewBounds(position, out Vector2 outerMin, out Vector2 outerMax,
++            out Vector2 currentMin, out Vector2 currentMax))
++        {
++            position.x = homePosition.x;
++            position.z = homePosition.z;
++            return position;
++        }
++
++        Vector2 center = new Vector2(position.x, position.z);
++        Vector2 min = outerMin - (currentMin - center);
++        Vector2 max = outerMax - (currentMax - center);
++        bool extra = useAdditionalPositionLimits && minimumCorner != null && maximumCorner != null;
++        position.x = ClampAxis(position.x, min.x, max.x,
++            extra ? minimumCorner.position.x : float.NegativeInfinity,
++            extra ? maximumCorner.position.x : float.PositiveInfinity);
++        position.z = ClampAxis(position.z, min.y, max.y,
++            extra ? minimumCorner.position.z : float.NegativeInfinity,
++            extra ? maximumCorner.position.z : float.PositiveInfinity);
++        return position;
++    }
++
++    private static float ClampAxis(float value, float min, float max, float extraMin, float extraMax)
++    {
++        if (min > max) return (min + max) * 0.5f;
++        float combinedMin = Mathf.Max(min, extraMin);
++        float combinedMax = Mathf.Min(max, extraMax);
++        if (combinedMin <= combinedMax)
++        {
++            min = combinedMin;
++            max = combinedMax;
++        }
++        return Mathf.Clamp(value, min, max);
++    }
++
++    public bool GetAutomaticViewBounds(out Vector2 min, out Vector2 max)
++    {
++        min = max = Vector2.zero;
++        Transform view = ViewTransform;
++        if (-view.forward.y < 0.01f) return false;
++        Vector3 home = Application.isPlaying ? homePosition : view.position;
++        float homeDistanceToGround = home.y / -view.forward.y;
++        Vector3 farPosition = home + view.forward * (homeDistanceToGround - farthestDistance);
++        if (!GetGroundView(farPosition, outerView)) return false;
++        min = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
++        max = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
++        for (int i = 0; i < 4; i++)
++        {
++            min = Vector2.Min(min, outerView[i]);
++            max = Vector2.Max(max, outerView[i]);
++        }
++        min -= Vector2.one * farZoomPanRadius;
++        max += Vector2.one * farZoomPanRadius;
++        return true;
++    }
++
++    private bool GetViewBounds(Vector3 position, out Vector2 outerMin, out Vector2 outerMax,
++        out Vector2 currentMin, out Vector2 currentMax)
++    {
++        outerMin = currentMin = Vector2.zero;
++        outerMax = currentMax = Vector2.zero;
++        if (!GetAutomaticViewBounds(out outerMin, out outerMax) ||
++            !GetGroundView(position, currentView)) return false;
++        if (useCustomViewBounds && minimumView.x < maximumView.x &&
++            minimumView.y < maximumView.y)
++        {
++            outerMin = minimumView;
++            outerMax = maximumView;
++        }
++        currentMin = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
++        currentMax = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
++        for (int i = 0; i < 4; i++)
++        {
++            currentMin = Vector2.Min(currentMin, currentView[i]);
++            currentMax = Vector2.Max(currentMax, currentView[i]);
++        }
++        return true;
++    }
++
++    private bool GetGroundView(Vector3 position, Vector2[] corners)
++    {
++        Camera sceneCamera = GetComponent<Camera>();
++        Quaternion rotation = ViewTransform.rotation;
++        float height = Mathf.Tan(FieldOfView * Mathf.Deg2Rad * 0.5f);
++        float width = height * sceneCamera.aspect;
++        for (int i = 0; i < 4; i++)
++        {
++            float x = i == 0 || i == 3 ? -width : width;
++            float y = i < 2 ? -height : height;
++            Vector3 direction = rotation * new Vector3(x, y, 1f);
++            if (direction.y >= -0.001f) return false;
++            Vector3 point = position + direction * (-position.y / direction.y);
++            corners[i] = new Vector2(point.x, point.z);
++        }
++        return true;
++    }
++
++    private void OnDrawGizmos()
++    {
++        if (!GetViewBounds(ViewTransform.position, out Vector2 outerMin, out Vector2 outerMax,
++            out Vector2 currentMin, out Vector2 currentMax)) return;
++        Gizmos.color = new Color(0f, 0.65f, 1f, 0.95f);
++        DrawRectangle(outerMin, outerMax, 0.05f);
++        Gizmos.color = new Color(1f, 0.8f, 0f, 0.85f);
++        DrawRectangle(currentMin, currentMax, 0.08f);
++    }
++
++    private static void DrawRectangle(Vector2 min, Vector2 max, float height)
++    {
++        Gizmos.DrawWireCube(new Vector3((min.x + max.x) * 0.5f, height,
++            (min.y + max.y) * 0.5f), new Vector3(max.x - min.x, 0, max.y - min.y));
++    }
++}
+diff --git a/Assets/Scripts/Interaction/CommunityCamera.cs.meta b/Assets/Scripts/Interaction/CommunityCamera.cs.meta
+new file mode 100644
+index 0000000..a5cac18
+--- /dev/null
++++ b/Assets/Scripts/Interaction/CommunityCamera.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 8e4f8a2a1a6e4a8091a9bb63a07ce275
+diff --git a/Assets/Scripts/Interaction/WorkerAssignment.cs b/Assets/Scripts/Interaction/WorkerAssignment.cs
+index 5bc19bb..82489fe 100644
+--- a/Assets/Scripts/Interaction/WorkerAssignment.cs
++++ b/Assets/Scripts/Interaction/WorkerAssignment.cs
+@@ -18,6 +18,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
+     public int ProductionReduction { get; private set; }
+     public float MovementDurationMultiplier { get; private set; } = 1f;
+     public WorkProgress Progress => workProgress;
++    public string DisplayName => workerName;
+ 
+     private int nextDayProductionReduction;
+     private float nextDayMovementDurationMultiplier = 1f;
+diff --git a/Assets/Scripts/UI/ActiveMissionCard.cs b/Assets/Scripts/UI/ActiveMissionCard.cs
+index 694ff24..289c555 100644
+--- a/Assets/Scripts/UI/ActiveMissionCard.cs
++++ b/Assets/Scripts/UI/ActiveMissionCard.cs
+@@ -8,7 +8,7 @@ public sealed class ActiveMissionCard : MonoBehaviour
+     [SerializeField] private Text quantityText;
+     [SerializeField] private Text rewardText;
+ 
+-    public void Bind(DeliveryMission mission, int day, int stock, Sprite icon)
++    public void Bind(DeliveryMission mission, int stock, Sprite icon)
+     {
+         if (description != null) description.text = mission.title;
+         if (itemIcon != null) itemIcon.sprite = icon;
+diff --git a/Assets/Scripts/UI/ActiveMissionsPanel.cs b/Assets/Scripts/UI/ActiveMissionsPanel.cs
+index 224914a..2cbf229 100644
+--- a/Assets/Scripts/UI/ActiveMissionsPanel.cs
++++ b/Assets/Scripts/UI/ActiveMissionsPanel.cs
+@@ -54,7 +54,7 @@ public sealed class ActiveMissionsPanel : MonoBehaviour
+         if (toggleText != null) toggleText.text = isOpen ? "FECHAR" : "MISSÕES";
+     }
+ 
+-    public void Refresh(IReadOnlyList<DeliveryMission> missions, int day, ResourceBank resources)
++    public void Refresh(IReadOnlyList<DeliveryMission> missions, ResourceBank resources)
+     {
+         if (cards == null) return;
+         int shown = 0;
+@@ -76,7 +76,7 @@ public sealed class ActiveMissionsPanel : MonoBehaviour
+             };
+             card.gameObject.SetActive(true);
+             Sprite icon = itemIcons != null && (int)mission.item < itemIcons.Length ? itemIcons[(int)mission.item] : null;
+-            card.Bind(mission, day, stock, icon);
++            card.Bind(mission, stock, icon);
+         }
+         for (int i = shown; i < cards.Length; i++)
+             if (cards[i] != null) cards[i].gameObject.SetActive(false);
+diff --git a/Assets/Scripts/UI/GatheringMinigame.cs b/Assets/Scripts/UI/GatheringMinigame.cs
+index 4105e3a..fe621f0 100644
+--- a/Assets/Scripts/UI/GatheringMinigame.cs
++++ b/Assets/Scripts/UI/GatheringMinigame.cs
+@@ -1,14 +1,12 @@
+ using System;
+ using DG.Tweening;
+ using UnityEngine;
+-using UnityEngine.UI;
+ 
+ public sealed class GatheringMinigame : MonoBehaviour
+ {
+     [SerializeField] private CanvasGroup group;
+     [SerializeField] private RectTransform marker;
+     [SerializeField] private RectTransform greenTarget;
+-    [SerializeField] private Text title;
+     [SerializeField, Min(0.1f)] private float markerCrossingDuration = 2f;
+     [SerializeField, Min(0f)] private float edgePadding = 8f;
+     [SerializeField, Min(2)] private int rounds = 3;
+@@ -17,7 +15,6 @@ public sealed class GatheringMinigame : MonoBehaviour
+ 
+     private Action<int> completed;
+     private RectTransform bar;
+-    private string activityTitle;
+     private int round;
+     private int hits;
+     private float difficultyMultiplier;
+@@ -43,7 +40,6 @@ public sealed class GatheringMinigame : MonoBehaviour
+         }
+ 
+         completed = onCompleted;
+-        activityTitle = activity == ActivityKind.Fish ? "PESCA" : "MADEIRA";
+         round = 0;
+         hits = 0;
+         difficultyMultiplier = activity == ActivityKind.Fish ?
+@@ -120,9 +116,6 @@ public sealed class GatheringMinigame : MonoBehaviour
+             .SetEase(Ease.InOutCubic).SetLoops(-1, LoopType.Yoyo);
+ 
+         roundStartedAt = Time.unscaledTime;
+-        //if (title != null)
+-        //    title.text = activityTitle + ": ACERTE O VERDE\n" + (round + 1) + "/" + rounds +
+-        //        " · ACERTOS: " + hits;
+     }
+ 
+     private void Hide()
+diff --git a/Assets/Scripts/UI/ShopSellPanel.cs b/Assets/Scripts/UI/ShopSellPanel.cs
+index dbfa844..ab09e63 100644
+--- a/Assets/Scripts/UI/ShopSellPanel.cs
++++ b/Assets/Scripts/UI/ShopSellPanel.cs
+@@ -60,9 +60,10 @@ public sealed class ShopSellPanel : MonoBehaviour
+             if (row == null) continue;
+             SaleItem item = (SaleItem)i;
+             int price = trading.GetPrice(item);
++            int stock = trading.GetStock(item);
+             row.SetPrice(price);
+-            row.SetStock(trading.GetStock(item));
+-            row.SetLimit(trading.GetStock(item));
++            row.SetStock(stock);
++            row.SetLimit(stock);
+             total += (long)row.Quantity * price;
+         }
+         if (totalText != null) totalText.text = "RECEBER: " + total + " moedas";
+diff --git a/Assets/Scripts/UI/ShopTabs.cs b/Assets/Scripts/UI/ShopTabs.cs
+index 49f1ac2..ba4ad54 100644
+--- a/Assets/Scripts/UI/ShopTabs.cs
++++ b/Assets/Scripts/UI/ShopTabs.cs
+@@ -8,7 +8,6 @@ public sealed class ShopTabs : MonoBehaviour
+     [SerializeField] private CanvasGroup ordersPage;
+     [SerializeField] private Button buyTab;
+     [SerializeField] private Button sellTab;
+-    [SerializeField] private Button ordersTab;
+     [SerializeField] private ShopSellPanel sellPanel;
+ 
+     public void ShowDefault(bool marketOpen)
+diff --git a/Packages/manifest.json b/Packages/manifest.json
+index 43e4dbe..f99dd44 100644
+--- a/Packages/manifest.json
++++ b/Packages/manifest.json
+@@ -1,6 +1,7 @@
+ {
+   "dependencies": {
+     "com.unity.ai.navigation": "2.0.10",
++    "com.unity.cinemachine": "3.1.7",
+     "com.unity.collab-proxy": "2.11.3",
+     "com.unity.ide.rider": "3.0.39",
+     "com.unity.ide.visualstudio": "2.0.26",
+diff --git a/Packages/packages-lock.json b/Packages/packages-lock.json
+index fffacc2..3b9ba84 100644
+--- a/Packages/packages-lock.json
++++ b/Packages/packages-lock.json
+@@ -19,6 +19,16 @@
+       },
+       "url": "https://packages.unity.com"
+     },
++    "com.unity.cinemachine": {
++      "version": "3.1.7",
++      "depth": 0,
++      "source": "registry",
++      "dependencies": {
++        "com.unity.splines": "2.0.0",
++        "com.unity.modules.imgui": "1.0.0"
++      },
++      "url": "https://packages.unity.com"
++    },
+     "com.unity.collab-proxy": {
+       "version": "2.11.3",
+       "depth": 0,
+@@ -133,6 +143,13 @@
+       "dependencies": {},
+       "url": "https://packages.unity.com"
+     },
++    "com.unity.settings-manager": {
++      "version": "2.1.1",
++      "depth": 2,
++      "source": "registry",
++      "dependencies": {},
++      "url": "https://packages.unity.com"
++    },
+     "com.unity.shadergraph": {
+       "version": "17.3.0",
+       "depth": 1,
+@@ -142,6 +159,17 @@
+         "com.unity.searcher": "4.9.3"
+       }
+     },
++    "com.unity.splines": {
++      "version": "2.8.2",
++      "depth": 1,
++      "source": "registry",
++      "dependencies": {
++        "com.unity.mathematics": "1.2.1",
++        "com.unity.modules.imgui": "1.0.0",
++        "com.unity.settings-manager": "1.0.3"
++      },
++      "url": "https://packages.unity.com"
++    },
+     "com.unity.test-framework": {
+       "version": "1.6.0",
+       "depth": 0,

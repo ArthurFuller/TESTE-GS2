@@ -17,6 +17,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     public int ProductionReduction { get; private set; }
     public float MovementDurationMultiplier { get; private set; } = 1f;
     public WorkProgress Progress => workProgress;
+    public string DisplayName => workerName;
 
     private int nextDayProductionReduction;
     private float nextDayMovementDurationMultiplier = 1f;
