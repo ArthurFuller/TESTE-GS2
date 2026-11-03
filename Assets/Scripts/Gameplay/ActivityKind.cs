@@ -7,5 +7,16 @@ public enum ActivityKind
     PlantCorn,
     PlantPumpkin,
     Harvest,
-    PrepareFood
+    PrepareFood,
+    Gamble,
+    Rest,
+    Coffee,
+    Replay,
+    FishPlus,
+    WoodPlus,
+    FoodPlus,
+    WateringCan,
+    Fertilizer,
+    BuildHouse,
+    BuildFence
 }

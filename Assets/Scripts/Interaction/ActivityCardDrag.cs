@@ -21,7 +21,15 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private bool hovered;
 
     public ActivityKind Kind => activity;
+    public string DisplayName => activityName;
     public string Description => description;
+    public bool HasEffect => activity <= ActivityKind.PrepareFood;
+
+    public void ConfigureRuntime(Camera camera, DragCursorPreview cursorPreview)
+    {
+        worldCamera = camera;
+        preview = cursorPreview;
+    }
 
     private void OnEnable()
     {
@@ -52,6 +60,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        if (!HasEffect) return;
         RestoreHover(true);
         dragging = true;
         cancelled = false;
@@ -81,7 +90,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         ClearDrag();
         RestoreHover(false);
         if (target != null)
-            target.TryAssign(activity, activityName);
+            target.TryAssign(activity, activityName, this);
     }
 
     public void CancelDrag()

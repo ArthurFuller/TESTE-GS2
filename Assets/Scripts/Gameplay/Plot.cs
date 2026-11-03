@@ -10,6 +10,9 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
     [SerializeField] private Material plowedMaterial;
     [SerializeField] private GameObject cornVisual;
     [SerializeField] private GameObject pumpkinVisual;
+    [SerializeField] private GameObject growthBar;
+    [SerializeField] private Transform growthFill;
+    [SerializeField, Min(0.01f)] private float growthFillWidth = 0.84f;
 
     public bool IsPlowed { get; private set; }
     public CropType Crop { get; private set; }
@@ -34,7 +37,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         StateChanged?.Invoke();
     }
 
-    public void Plant(CropType crop, int currentDay)
+    public void Plant(CropType crop, int currentDay, SeedCatalog catalog)
     {
         if (!IsPlowed || !IsEmpty || crop == CropType.None)
             return;
@@ -43,26 +46,55 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         growthAdjustment = 0;
         if (cornVisual != null) cornVisual.SetActive(crop == CropType.Corn);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(crop == CropType.Pumpkin);
-        RefreshGrowth(currentDay, null);
+        if (growthBar != null) growthBar.SetActive(true);
+        RefreshGrowth(currentDay, catalog);
         StateChanged?.Invoke();
     }
 
     public bool IsReady(int currentDay, SeedCatalog catalog)
     {
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
-        return settings != null && currentDay + growthAdjustment >= PlantedDay + settings.growthDays;
+        int age = currentDay + growthAdjustment - PlantedDay;
+        return settings != null && age >= settings.growthDays &&
+            age < settings.growthDays + settings.witherDaysAfterMaturity;
+    }
+
+    public int HarvestYield(int currentDay, SeedCatalog catalog)
+    {
+        CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
+        return settings == null ? 0 : settings.foodYield +
+            Mathf.Max(0, currentDay + growthAdjustment - PlantedDay - settings.growthDays) *
+            settings.bonusYieldPerExtraDay;
     }
 
     public void RefreshGrowth(int currentDay, SeedCatalog catalog)
     {
         GameObject visual = Crop == CropType.Corn ? cornVisual : pumpkinVisual;
-        if (Crop == CropType.None || visual == null)
+        if (Crop == CropType.None)
             return;
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
         int growthDays = settings != null ? settings.growthDays : 2;
-        float progress = Mathf.Clamp01((float)(currentDay + growthAdjustment - PlantedDay) / growthDays);
-        visual.transform.DOKill();
-        visual.transform.DOScale(new Vector3(1f, Mathf.Lerp(0.45f, 1f, progress), 1f), 0.35f);
+        int age = currentDay + growthAdjustment - PlantedDay;
+        if (settings != null && age >= growthDays + settings.witherDaysAfterMaturity)
+        {
+            Harvest();
+            return;
+        }
+        float progress = Mathf.Clamp01((float)age / growthDays);
+        if (visual != null)
+        {
+            visual.transform.DOKill();
+            visual.transform.DOScale(new Vector3(1f, Mathf.Lerp(0.45f, 1f, progress), 1f), 0.35f);
+        }
+        if (growthFill != null)
+        {
+            float width = Mathf.Max(0.001f, growthFillWidth * progress);
+            Vector3 size = growthFill.localScale;
+            growthFill.localScale = new Vector3(width, size.y, size.z);
+            Vector3 position = growthFill.localPosition;
+            growthFill.localPosition = new Vector3(-growthFillWidth * 0.5f + width * 0.5f,
+                position.y, position.z);
+        }
     }
 
     public CropType Harvest()
@@ -71,6 +103,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler
         Crop = CropType.None;
         if (cornVisual != null) cornVisual.SetActive(false);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(false);
+        if (growthBar != null) growthBar.SetActive(false);
         StateChanged?.Invoke();
         return harvested;
     }

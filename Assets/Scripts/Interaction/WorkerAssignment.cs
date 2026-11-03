@@ -67,10 +67,10 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
             selectionMarker.SetActive(selected || hovered);
     }
 
-    public void TryAssign(ActivityKind activity, string activityName)
+    public void TryAssign(ActivityKind activity, string activityName, ActivityCardDrag card = null)
     {
         if (actionResolver != null)
-            actionResolver.TryAssign(this, activity, activityName);
+            actionResolver.TryAssign(this, activity, activityName, card);
     }
 
     public void SetStatus(string status)

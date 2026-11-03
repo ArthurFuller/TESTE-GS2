@@ -13,6 +13,8 @@ public static class ActivityCardPlaySave
         public string scenePath;
         public int maxHandCards;
         public float[] values;
+        public Vector2 containerSize;
+        public Vector2 containerPosition;
         public bool changed;
     }
 
@@ -20,7 +22,8 @@ public static class ActivityCardPlaySave
     private static readonly string[] Fields =
     {
         "handWidth", "cardSpacing", "cardBaseY", "arcHeight", "arcAngle",
-        "hoverLift", "hoverScale", "hoverDuration", "hoverSpread", "descriptionGap"
+        "hoverLift", "hoverScale", "hoverDuration", "hoverSpread", "descriptionGap",
+        "containerPadding"
     };
 
     static ActivityCardPlaySave()
@@ -44,6 +47,8 @@ public static class ActivityCardPlaySave
             current.changed = original.maxHandCards != current.maxHandCards;
             for (int i = 0; i < Fields.Length; i++)
                 if (!Mathf.Approximately(original.values[i], current.values[i])) current.changed = true;
+            if (original.containerSize != current.containerSize ||
+                original.containerPosition != current.containerPosition) current.changed = true;
             SessionState.SetString(Key, JsonUtility.ToJson(current));
         }
         else if (state == PlayModeStateChange.EnteredEditMode)
@@ -65,7 +70,9 @@ public static class ActivityCardPlaySave
         {
             scenePath = hand.gameObject.scene.path,
             maxHandCards = source.FindProperty("maxHandCards").intValue,
-            values = new float[Fields.Length]
+            values = new float[Fields.Length],
+            containerSize = ((RectTransform)hand.transform.parent).sizeDelta,
+            containerPosition = ((RectTransform)hand.transform.parent).anchoredPosition
         };
         for (int i = 0; i < Fields.Length; i++)
             settings.values[i] = source.FindProperty(Fields[i]).floatValue;
@@ -96,6 +103,9 @@ public static class ActivityCardPlaySave
         for (int i = 0; i < Fields.Length; i++)
             destination.FindProperty(Fields[i]).floatValue = settings.values[i];
         destination.ApplyModifiedPropertiesWithoutUndo();
+        RectTransform container = (RectTransform)hand.transform.parent;
+        container.sizeDelta = settings.containerSize;
+        container.anchoredPosition = settings.containerPosition;
         EditorSceneManager.MarkSceneDirty(scene);
         if (EditorSceneManager.SaveScene(scene)) SessionState.EraseString(Key);
     }

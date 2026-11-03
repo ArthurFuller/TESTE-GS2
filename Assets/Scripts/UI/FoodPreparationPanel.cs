@@ -59,7 +59,7 @@ public sealed class FoodPreparationPanel : MonoBehaviour
         if (selectionText == null || resources == null) return;
         selectionText.text = "ESCOLHA OS INGREDIENTES\nPeixe: " + fish + " / " + resources.Fish +
             "\nMilho: " + corn + " / " + resources.Corn +
-            "\nAbóbora: " + pumpkin + " / " + resources.Pumpkin +
+            "\nMacaxeira: " + pumpkin + " / " + resources.Pumpkin +
             "\nComida gerada: " + (trading != null ? trading.EstimateFood(fish, corn, pumpkin) : 0);
     }
 }

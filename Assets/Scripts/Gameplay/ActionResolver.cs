@@ -54,9 +54,11 @@ public sealed class ActionResolver : MonoBehaviour
     }
 
     private WorkerAssignment pendingPlotWorker;
+    private ActivityCardDrag pendingPlotCard;
     private ActivityKind pendingPlotAction;
     private int busyWorkers;
     private WorkerAssignment pendingFoodWorker;
+    private ActivityCardDrag pendingFoodCard;
     private GatheringTask forestTask;
     private GatheringTask fishingTask;
     private GatheringTask activeMinigame;
@@ -72,6 +74,7 @@ public sealed class ActionResolver : MonoBehaviour
     public int CropsStoredToday { get; private set; }
     public int PlotsPlowedToday { get; private set; }
     public int CropsHarvestedToday { get; private set; }
+    public event System.Action<ActivityCardDrag> CardUsed;
 
     private void Start()
     {
@@ -105,7 +108,8 @@ public sealed class ActionResolver : MonoBehaviour
         UpdateGathering(fishingTask);
     }
 
-    public void TryAssign(WorkerAssignment worker, ActivityKind activity, string activityName)
+    public void TryAssign(WorkerAssignment worker, ActivityKind activity, string activityName,
+        ActivityCardDrag card = null)
     {
         if (dayCycle == null || !dayCycle.CanAcceptActions)
             return;
@@ -139,7 +143,7 @@ public sealed class ActionResolver : MonoBehaviour
 
         if (activity == ActivityKind.PrepareFood)
         {
-            AssignFoodPreparation(worker);
+            AssignFoodPreparation(worker, card);
             return;
         }
 
@@ -148,14 +152,14 @@ public sealed class ActionResolver : MonoBehaviour
         if (activity == ActivityKind.Plow || activity == ActivityKind.PlantCorn ||
             activity == ActivityKind.PlantPumpkin || activity == ActivityKind.Harvest)
         {
-            SelectPlot(worker, activity, activityName);
+            SelectPlot(worker, activity, activityName, card);
             return;
         }
 
-        StartGathering(worker, activity, activityName);
+        StartGathering(worker, activity, activityName, card);
     }
 
-    private void AssignFoodPreparation(WorkerAssignment worker)
+    private void AssignFoodPreparation(WorkerAssignment worker, ActivityCardDrag card)
     {
         if (foodPreparationPanel == null || inventoryTrading == null || foodPreparationDestination == null)
         {
@@ -164,6 +168,7 @@ public sealed class ActionResolver : MonoBehaviour
         }
         ClearPendingPlot();
         pendingFoodWorker = worker;
+        pendingFoodCard = card;
         worker.Select();
         worker.SetStatus("indo à bancada");
         MoveWorker(worker, foodPreparationDestination.position, () =>
@@ -179,18 +184,22 @@ public sealed class ActionResolver : MonoBehaviour
         if (pendingPlotWorker != null && !pendingPlotWorker.UsedToday)
             pendingPlotWorker.SetStatus("livre");
         pendingPlotWorker = null;
+        pendingPlotCard = null;
     }
 
-    private void SelectPlot(WorkerAssignment worker, ActivityKind activity, string activityName)
+    private void SelectPlot(WorkerAssignment worker, ActivityKind activity, string activityName,
+        ActivityCardDrag card)
     {
         pendingPlotWorker = worker;
+        pendingPlotCard = card;
         pendingPlotAction = activity;
         worker.Select();
         worker.SetStatus("escolha um terreno");
         feedback.ShowMessage("Clique no terreno para " + activityName.ToLowerInvariant() + ".");
     }
 
-    private void StartGathering(WorkerAssignment worker, ActivityKind activity, string activityName)
+    private void StartGathering(WorkerAssignment worker, ActivityKind activity, string activityName,
+        ActivityCardDrag card)
     {
         GatheringTask task = activity == ActivityKind.CollectWood ? forestTask : fishingTask;
         if (task == null || task.Destination == null || villageExit == null ||
@@ -211,6 +220,7 @@ public sealed class ActionResolver : MonoBehaviour
         task.Started = false;
         task.StillTime = 0f;
         worker.MarkUsed(activityName);
+        CardUsed?.Invoke(card);
         feedback.ShowMessage(activityName + " em andamento. Use o botão para acompanhar.");
         UpdateVisitButton(task);
         MoveToGatheringArea(task);
@@ -273,8 +283,10 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Esse terreno já está arado.");
             return;
         }
+        ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
         worker.MarkUsed("arando");
+        CardUsed?.Invoke(card);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
             plot.Plow();
@@ -291,16 +303,19 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Plante em um terreno arado e vazio.");
             return;
         }
-        if (resources == null || seedCatalog == null || !resources.TrySpendSeed(crop))
+        if (resources == null || seedCatalog == null || resources.Seeds(crop) == 0)
         {
             feedback.ShowMessage("Falta semente de " + (seedCatalog != null ? seedCatalog.Get(crop).displayName : crop.ToString()) + ".");
             return;
         }
+        ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
         worker.MarkUsed("plantando");
+        CardUsed?.Invoke(card);
+        resources.TrySpendSeed(crop);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
-            plot.Plant(crop, dayCycle.CurrentDay);
+            plot.Plant(crop, dayCycle.CurrentDay, seedCatalog);
             worker.SetStatus("plantio concluído");
             feedback.ShowMessage(seedCatalog.Get(crop).displayName + " plantado.");
         });
@@ -313,13 +328,16 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("A plantação ainda não está pronta.");
             return;
         }
+        ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
         worker.MarkUsed("colhendo");
+        CardUsed?.Invoke(card);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
+            int harvestYield = plot.HarvestYield(dayCycle.CurrentDay, seedCatalog);
             CropType crop = plot.Harvest();
             CropSettings settings = seedCatalog.Get(crop);
-            int gained = Mathf.Max(0, settings.foodYield - worker.ProductionReduction -
+            int gained = Mathf.Max(0, harvestYield - worker.ProductionReduction -
                 (dayEvents != null ? dayEvents.HarvestReduction : 0));
             resources.AddCrop(crop, gained);
             CropsStoredToday += gained;
@@ -339,8 +357,11 @@ public sealed class ActionResolver : MonoBehaviour
             return false;
         }
         WorkerAssignment worker = pendingFoodWorker;
+        ActivityCardDrag card = pendingFoodCard;
         pendingFoodWorker = null;
+        pendingFoodCard = null;
         worker.MarkUsed("preparando comida");
+        CardUsed?.Invoke(card);
         WorkAtStation(worker, foodPreparationDuration, () =>
         {
             resources.AddFood(preparedFood);
@@ -355,6 +376,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         if (pendingFoodWorker != null && !pendingFoodWorker.UsedToday) pendingFoodWorker.SetStatus("livre");
         pendingFoodWorker = null;
+        pendingFoodCard = null;
     }
 
     public void TravelToMerchant(WorkerAssignment worker, Vector3 destination, System.Action onArrived)
@@ -378,6 +400,8 @@ public sealed class ActionResolver : MonoBehaviour
     {
         WorkerAssignment worker = pendingPlotWorker;
         pendingPlotWorker = null;
+        pendingPlotCard = null;
+        pendingFoodCard = null;
         pendingFoodWorker = null;
         return worker;
     }
@@ -400,7 +424,9 @@ public sealed class ActionResolver : MonoBehaviour
     public void BeginNextDay()
     {
         pendingPlotWorker = null;
+        pendingPlotCard = null;
         pendingFoodWorker = null;
+        pendingFoodCard = null;
         WoodGainedToday = 0;
         FoodGainedToday = 0;
         FishGainedToday = 0;

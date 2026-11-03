@@ -10,6 +10,8 @@ public sealed class CropSettings
     [Min(1)] public int seedsPerPurchase;
     [Min(1)] public int growthDays;
     [Min(0)] public int foodYield;
+    [Min(0)] public int bonusYieldPerExtraDay = 1;
+    [Min(1)] public int witherDaysAfterMaturity = 2;
 }
 
 public sealed class SeedCatalog : MonoBehaviour
@@ -21,7 +23,7 @@ public sealed class SeedCatalog : MonoBehaviour
     };
     [SerializeField] private CropSettings pumpkin = new CropSettings
     {
-        type = CropType.Pumpkin, displayName = "Abóbora", coinCost = 3, seedsPerPurchase = 1,
+        type = CropType.Pumpkin, displayName = "Macaxeira", coinCost = 3, seedsPerPurchase = 1,
         growthDays = 3, foodYield = 7
     };
 

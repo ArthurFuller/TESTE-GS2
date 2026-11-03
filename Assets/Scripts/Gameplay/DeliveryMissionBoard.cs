@@ -175,8 +175,8 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             DeliveryItem.CornSeeds => new[] { "Milho para o vizinho", "Sementes para o roçado" },
             DeliveryItem.Fish => new[] { "Peixes para a comunidade", "Encomenda de peixe" },
             DeliveryItem.Corn => new[] { "Milho para a feira", "Colheita encomendada" },
-            DeliveryItem.Pumpkin => new[] { "Abóboras da comunidade", "Abóboras para a feira" },
-            _ => new[] { "Plantio de abóbora", "Sementes para a feira" }
+            DeliveryItem.Pumpkin => new[] { "Macaxeira da comunidade", "Macaxeira para a feira" },
+            _ => new[] { "Plantio de macaxeira", "Sementes para a feira" }
         };
         return titles[UnityEngine.Random.Range(0, titles.Length)];
     }
@@ -200,8 +200,8 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
         DeliveryItem.CornSeeds => "sementes de milho",
         DeliveryItem.Fish => "peixe",
         DeliveryItem.Corn => "milho",
-        DeliveryItem.Pumpkin => "abóbora",
-        _ => "sementes de abóbora"
+        DeliveryItem.Pumpkin => "macaxeira",
+        _ => "sementes de macaxeira"
     };
 
     private void Refresh()

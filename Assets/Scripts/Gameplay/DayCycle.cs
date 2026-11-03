@@ -14,6 +14,8 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField] private SeedMerchant merchant;
     [SerializeField] private DeliveryMissionBoard missionBoard;
     [SerializeField] private DayEventController dayEvents;
+    [SerializeField] private FeedingMinigame feedingGame;
+    [SerializeField] private CardRewardChoice cardChoice;
     [SerializeField] private Text dayText;
     [SerializeField] private Button finishDayButton;
     [SerializeField] private Button continueButton;
@@ -25,9 +27,12 @@ public sealed class DayCycle : MonoBehaviour
 
     private int currentDay = 1;
     private bool summaryOpen;
+    private bool feedingOpen;
     private bool gameOver;
+    private int foodBeforeFeeding;
 
-    public bool CanAcceptActions => !summaryOpen && !gameOver && (dayEvents == null || !dayEvents.IsPanelOpen);
+    public bool CanAcceptActions => !summaryOpen && !feedingOpen && !gameOver &&
+        (dayEvents == null || !dayEvents.IsPanelOpen);
     public int CurrentDay => currentDay;
     public event Action DayChanged;
 
@@ -51,14 +56,27 @@ public sealed class DayCycle : MonoBehaviour
             return;
         }
 
-        int foodBefore = resources.Food;
+        if (feedingGame == null)
+        {
+            feedback.ShowMessage("Minigame de alimentação não configurado.");
+            return;
+        }
+        foodBeforeFeeding = resources.Food;
+        feedingOpen = true;
+        if (finishDayButton != null) finishDayButton.interactable = false;
+        feedingGame.Begin(workers, foodPerWorker, FinishFeeding);
+    }
+
+    private void FinishFeeding(int[] portions)
+    {
         int fullyFed = 0;
         int partiallyFed = 0;
         int unfed = 0;
         int absent = 0;
 
-        foreach (WorkerAssignment worker in workers)
+        for (int i = 0; i < workers.Length; i++)
         {
+            WorkerAssignment worker = workers[i];
             if (worker == null) continue;
             if (worker.IsUnavailableToday)
             {
@@ -66,7 +84,7 @@ public sealed class DayCycle : MonoBehaviour
                 continue;
             }
 
-            int received = resources.ConsumeFood(foodPerWorker);
+            int received = portions[i];
             if (received >= foodPerWorker)
             {
                 fullyFed++;
@@ -84,6 +102,17 @@ public sealed class DayCycle : MonoBehaviour
             }
         }
 
+        if (cardChoice != null && currentDay < totalDays)
+        {
+            cardChoice.Begin(() => ShowDaySummary(fullyFed, partiallyFed, unfed, absent));
+            return;
+        }
+        ShowDaySummary(fullyFed, partiallyFed, unfed, absent);
+    }
+
+    private void ShowDaySummary(int fullyFed, int partiallyFed, int unfed, int absent)
+    {
+        feedingOpen = false;
         summaryOpen = true;
         gameOver = currentDay >= totalDays;
         if (finishDayButton != null) finishDayButton.interactable = false;
@@ -98,7 +127,7 @@ public sealed class DayCycle : MonoBehaviour
         summary.AppendLine("Colheita guardada: +" + actions.CropsStoredToday);
         summary.AppendLine("Terrenos arados: " + actions.PlotsPlowedToday);
         summary.AppendLine("Culturas colhidas: " + actions.CropsHarvestedToday);
-        summary.AppendLine("Comida consumida: " + (foodBefore - resources.Food));
+        summary.AppendLine("Comida consumida: " + (foodBeforeFeeding - resources.Food));
         summary.AppendLine("Alimentados: " + fullyFed + "  |  Parcial: " + partiallyFed +
             "  |  Sem comida: " + unfed + "  |  Ausentes: " + absent);
         summary.Append("Dinheiro: " + resources.Coins);
@@ -114,6 +143,7 @@ public sealed class DayCycle : MonoBehaviour
 
         summaryOpen = false;
         currentDay++;
+        resources.AdvanceFoodDay(currentDay);
         if (dayEvents != null) dayEvents.StartDay(currentDay);
         actions.BeginNextDay();
         foreach (Plot plot in plots)
