@@ -23,9 +23,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     public ActivityKind Kind => activity;
     public string DisplayName => activityName;
     public string Description => description;
-    public bool HasEffect => activity != ActivityKind.BuildHouse &&
-        activity != ActivityKind.BuildFence && activity != ActivityKind.FoodPlus &&
-        activity != ActivityKind.WateringCan && activity != ActivityKind.Fertilizer;
+    public bool HasEffect => activity != ActivityKind.BuildHouse;
 
     public void ConfigureRuntime(Camera camera, DragCursorPreview cursorPreview)
     {

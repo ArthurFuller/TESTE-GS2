@@ -4,9 +4,17 @@ using UnityEngine;
 
 public sealed class ResourceBank : MonoBehaviour
 {
-    [SerializeField, Min(0)] private int startingWood;
-    [SerializeField, Min(0)] private int startingFood = 2;
-    [SerializeField, Min(0)] private int startingCoins = 2;
+    [Header("Recursos iniciais")]
+    [SerializeField, Min(0), InspectorName("Madeira")] private int startingWood;
+    [SerializeField, Min(0), InspectorName("Comida pronta")] private int startingFood = 2;
+    [SerializeField, Min(0), InspectorName("Moedas")] private int startingCoins = 2;
+    [SerializeField, Min(0), InspectorName("Peixes")] private int startingFish;
+    [SerializeField, Min(0), InspectorName("Milho colhido")] private int startingCorn;
+    [SerializeField, Min(0), InspectorName("Macaxeira colhida")] private int startingPumpkin;
+    [SerializeField, Min(0), InspectorName("Jerimum colhido")] private int startingJerimum;
+    [SerializeField, Min(0), InspectorName("Sementes de milho")] private int startingCornSeeds;
+    [SerializeField, Min(0), InspectorName("Sementes de macaxeira")] private int startingPumpkinSeeds;
+    [SerializeField, Min(0), InspectorName("Sementes de jerimum")] private int startingJerimumSeeds;
 
     private sealed class FoodBatch
     {
@@ -22,23 +30,28 @@ public sealed class ResourceBank : MonoBehaviour
     public int Coins { get; private set; }
     public int CornSeeds { get; private set; }
     public int PumpkinSeeds { get; private set; }
+    public int JerimumSeeds { get; private set; }
     public int Fish { get; private set; }
     public int Corn { get; private set; }
     public int Pumpkin { get; private set; }
+    public int Jerimum { get; private set; }
     public event Action Changed;
 
     private void Awake()
     {
+        currentDay = 1;
         Wood = startingWood;
         Food = startingFood;
         foodBatches.Clear();
         if (Food > 0) foodBatches.Add(new FoodBatch { Amount = Food, ExpiresOnDay = 3 });
         Coins = startingCoins;
-        CornSeeds = 0;
-        PumpkinSeeds = 0;
-        Fish = 0;
-        Corn = 0;
-        Pumpkin = 0;
+        CornSeeds = startingCornSeeds;
+        PumpkinSeeds = startingPumpkinSeeds;
+        JerimumSeeds = startingJerimumSeeds;
+        Fish = startingFish;
+        Corn = startingCorn;
+        Pumpkin = startingPumpkin;
+        Jerimum = startingJerimum;
     }
 
     public void AddWood(int amount)
@@ -76,20 +89,23 @@ public sealed class ResourceBank : MonoBehaviour
     {
         if (crop == CropType.Corn) Corn += Mathf.Max(0, amount);
         else if (crop == CropType.Pumpkin) Pumpkin += Mathf.Max(0, amount);
+        else if (crop == CropType.Jerimum) Jerimum += Mathf.Max(0, amount);
         Changed?.Invoke();
     }
 
-    public bool TryPrepareFood(int fish, int corn, int pumpkin, int foodPerFish, int foodPerCorn, int foodPerPumpkin,
+    public bool TryPrepareFood(int fish, int corn, int pumpkin, int jerimum,
+        int foodPerFish, int foodPerCorn, int foodPerPumpkin, int foodPerJerimum,
         out int preparedFood)
     {
         preparedFood = 0;
-        if (fish < 0 || corn < 0 || pumpkin < 0 || fish > Fish || corn > Corn || pumpkin > Pumpkin ||
-            fish + corn + pumpkin == 0) return false;
+        if (fish < 0 || corn < 0 || pumpkin < 0 || jerimum < 0 || fish > Fish || corn > Corn ||
+            pumpkin > Pumpkin || jerimum > Jerimum || fish + corn + pumpkin + jerimum == 0) return false;
         Fish -= fish;
         Corn -= corn;
         Pumpkin -= pumpkin;
+        Jerimum -= jerimum;
         preparedFood = fish * Mathf.Max(0, foodPerFish) + corn * Mathf.Max(0, foodPerCorn) +
-            pumpkin * Mathf.Max(0, foodPerPumpkin);
+            pumpkin * Mathf.Max(0, foodPerPumpkin) + jerimum * Mathf.Max(0, foodPerJerimum);
         Changed?.Invoke();
         return true;
     }
@@ -99,12 +115,13 @@ public sealed class ResourceBank : MonoBehaviour
     {
         CropType.Corn => TryRemove(SaleItem.Corn, amount),
         CropType.Pumpkin => TryRemove(SaleItem.Pumpkin, amount),
+        CropType.Jerimum => TryRemove(SaleItem.Jerimum, amount),
         _ => false
     };
 
     public bool TrySellBatch(int[] quantities, int[] prices)
     {
-        if (quantities == null || prices == null || quantities.Length != 7 || prices.Length != 7) return false;
+        if (quantities == null || prices == null || quantities.Length != 9 || prices.Length != 9) return false;
         long total = 0;
         int selected = 0;
         for (int i = 0; i < quantities.Length; i++)
@@ -123,6 +140,8 @@ public sealed class ResourceBank : MonoBehaviour
         RemoveFood(quantities[(int)SaleItem.Food]);
         CornSeeds -= quantities[(int)SaleItem.CornSeeds];
         PumpkinSeeds -= quantities[(int)SaleItem.PumpkinSeeds];
+        Jerimum -= quantities[(int)SaleItem.Jerimum];
+        JerimumSeeds -= quantities[(int)SaleItem.JerimumSeeds];
         Coins += (int)total;
         Changed?.Invoke();
         return true;
@@ -136,7 +155,9 @@ public sealed class ResourceBank : MonoBehaviour
         SaleItem.Pumpkin => Pumpkin,
         SaleItem.Food => Food,
         SaleItem.CornSeeds => CornSeeds,
-        _ => PumpkinSeeds
+        SaleItem.PumpkinSeeds => PumpkinSeeds,
+        SaleItem.Jerimum => Jerimum,
+        _ => JerimumSeeds
     };
 
     public int ConsumeFood(int amount)
@@ -182,6 +203,7 @@ public sealed class ResourceBank : MonoBehaviour
     {
         if (type == CropType.Corn) CornSeeds += Mathf.Max(0, amount);
         if (type == CropType.Pumpkin) PumpkinSeeds += Mathf.Max(0, amount);
+        if (type == CropType.Jerimum) JerimumSeeds += Mathf.Max(0, amount);
         Changed?.Invoke();
     }
 
@@ -191,6 +213,7 @@ public sealed class ResourceBank : MonoBehaviour
     {
         CropType.Corn => TryRemove(SaleItem.CornSeeds, amount),
         CropType.Pumpkin => TryRemove(SaleItem.PumpkinSeeds, amount),
+        CropType.Jerimum => TryRemove(SaleItem.JerimumSeeds, amount),
         _ => false
     };
 
@@ -206,6 +229,8 @@ public sealed class ResourceBank : MonoBehaviour
             case SaleItem.Food: RemoveFood(amount); break;
             case SaleItem.CornSeeds: CornSeeds -= amount; break;
             case SaleItem.PumpkinSeeds: PumpkinSeeds -= amount; break;
+            case SaleItem.Jerimum: Jerimum -= amount; break;
+            case SaleItem.JerimumSeeds: JerimumSeeds -= amount; break;
             default: return false;
         }
         Changed?.Invoke();
@@ -214,6 +239,7 @@ public sealed class ResourceBank : MonoBehaviour
 
     public int Seeds(CropType type)
     {
-        return type == CropType.Corn ? CornSeeds : type == CropType.Pumpkin ? PumpkinSeeds : 0;
+        return type == CropType.Corn ? CornSeeds : type == CropType.Pumpkin ? PumpkinSeeds :
+            type == CropType.Jerimum ? JerimumSeeds : 0;
     }
 }

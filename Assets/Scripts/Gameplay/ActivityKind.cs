@@ -18,5 +18,6 @@ public enum ActivityKind
     WateringCan,
     Fertilizer,
     BuildHouse,
-    BuildFence
+    BuildFence,
+    PlantJerimum
 }

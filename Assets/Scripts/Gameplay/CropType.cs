@@ -2,5 +2,6 @@ public enum CropType
 {
     None,
     Corn,
-    Pumpkin
+    Pumpkin,
+    Jerimum
 }

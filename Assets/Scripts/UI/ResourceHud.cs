@@ -36,7 +36,7 @@ public sealed class ResourceHud : MonoBehaviour
             return;
         if (woodText != null) woodText.text = resources.Wood.ToString();
         if (fishText != null) fishText.text = resources.Fish.ToString();
-        if (cassavaText != null) cassavaText.text = "0";
+        if (cassavaText != null) cassavaText.text = resources.Jerimum.ToString();
         if (pumpkinText != null) pumpkinText.text = resources.Pumpkin.ToString();
         if (cornText != null) cornText.text = resources.Corn.ToString();
         if (foodText != null) foodText.text = "Comida: " + resources.Food;

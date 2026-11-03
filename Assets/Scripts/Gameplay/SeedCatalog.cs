@@ -19,16 +19,22 @@ public sealed class SeedCatalog : MonoBehaviour
     [SerializeField] private CropSettings corn = new CropSettings
     {
         type = CropType.Corn, displayName = "Milho", coinCost = 2, seedsPerPurchase = 2,
-        growthDays = 2, foodYield = 4
+        growthDays = 2, foodYield = 2
     };
     [SerializeField] private CropSettings pumpkin = new CropSettings
     {
         type = CropType.Pumpkin, displayName = "Macaxeira", coinCost = 3, seedsPerPurchase = 1,
-        growthDays = 3, foodYield = 7
+        growthDays = 2, foodYield = 4
+    };
+    [SerializeField] private CropSettings jerimum = new CropSettings
+    {
+        type = CropType.Jerimum, displayName = "Jerimum", coinCost = 3, seedsPerPurchase = 1,
+        growthDays = 3, foodYield = 5
     };
 
     public CropSettings Get(CropType type)
     {
-        return type == CropType.Corn ? corn : type == CropType.Pumpkin ? pumpkin : null;
+        return type == CropType.Corn ? corn : type == CropType.Pumpkin ? pumpkin :
+            type == CropType.Jerimum ? jerimum : null;
     }
 }

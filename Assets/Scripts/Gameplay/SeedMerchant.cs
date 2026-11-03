@@ -19,6 +19,9 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private DragCursorPreview dragPreview;
     [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
     [SerializeField] private ShopTabs shopTabs;
+    [SerializeField] private ActivityCardAvailability hand;
+    [SerializeField, Min(0)] private int fenceWoodCost = 8;
+    [SerializeField, Min(0)] private int fenceCoinCost = 8;
     [SerializeField] private int[] marketDays = { 1, 4, 7, 10 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
@@ -27,6 +30,9 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     public event Action AvailabilityChanged;
     public bool IsAvailable { get; private set; }
     public bool IsOpen => shopGroup != null && shopGroup.interactable;
+    public int FenceWoodCost => fenceWoodCost;
+    public int FenceCoinCost => fenceCoinCost;
+    public int FenceSlotsAvailable => hand != null ? hand.FreeSlots : 0;
 
     private void Awake() => HideShop();
     public void OnPointerClick(PointerEventData eventData) => RequestVisit(WorkerAssignment.Selected);
@@ -84,26 +90,39 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         {
             SaleItem.CornSeeds => catalog.Get(CropType.Corn).coinCost,
             SaleItem.PumpkinSeeds => catalog.Get(CropType.Pumpkin).coinCost,
+            SaleItem.JerimumSeeds => catalog.Get(CropType.Jerimum).coinCost,
             SaleItem.Food => foodCoinCost,
             _ => 0
         };
     }
 
-    public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int food)
+    public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int jerimumSeeds, int food, int fences)
     {
         if (!IsAvailable || !IsOpen || dayCycle == null || !dayCycle.CanAcceptActions || resources == null ||
-            cornSeeds < 0 || pumpkinSeeds < 0 || food < 0) return false;
+            catalog == null ||
+            cornSeeds < 0 || pumpkinSeeds < 0 || jerimumSeeds < 0 || food < 0 || fences < 0 ||
+            fences > FenceSlotsAvailable || resources.Wood < fences * fenceWoodCost) return false;
         long total = (long)cornSeeds * GetUnitPrice(SaleItem.CornSeeds) +
             (long)pumpkinSeeds * GetUnitPrice(SaleItem.PumpkinSeeds) +
-            (long)food * GetUnitPrice(SaleItem.Food);
+            (long)jerimumSeeds * GetUnitPrice(SaleItem.JerimumSeeds) +
+            (long)food * GetUnitPrice(SaleItem.Food) + (long)fences * fenceCoinCost;
         if (total <= 0 || total > int.MaxValue || !resources.TrySpendCoins((int)total))
         {
             if (feedback != null) feedback.ShowMessage("Moedas insuficientes para a compra.");
             return false;
         }
-        if (cornSeeds > 0) resources.AddSeeds(CropType.Corn, cornSeeds);
-        if (pumpkinSeeds > 0) resources.AddSeeds(CropType.Pumpkin, pumpkinSeeds);
+        if (cornSeeds > 0) resources.AddSeeds(CropType.Corn,
+            cornSeeds * catalog.Get(CropType.Corn).seedsPerPurchase);
+        if (pumpkinSeeds > 0) resources.AddSeeds(CropType.Pumpkin,
+            pumpkinSeeds * catalog.Get(CropType.Pumpkin).seedsPerPurchase);
+        if (jerimumSeeds > 0) resources.AddSeeds(CropType.Jerimum,
+            jerimumSeeds * catalog.Get(CropType.Jerimum).seedsPerPurchase);
         if (food > 0) resources.AddFood(food);
+        if (fences > 0)
+        {
+            resources.TrySpendWood(fences * fenceWoodCost);
+            for (int i = 0; i < fences; i++) hand.AddCard(ActivityKind.BuildFence);
+        }
         if (feedback != null) feedback.ShowMessage("Compra concluída: -" + total + " moedas.");
         return true;
     }
@@ -119,7 +138,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         shopGroup.blocksRaycasts = true;
         shopGroup.interactable = true;
         shopGroup.DOFade(1, panelFadeDuration);
-        if (shopStatusText != null) shopStatusText.text = "Escolha as quantidades para comprar ou vender.";
+        if (shopStatusText != null) shopStatusText.text = "Role a lista para ver todos os itens.";
     }
 
     public void HideShop()

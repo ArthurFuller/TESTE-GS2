@@ -9,6 +9,11 @@ public sealed class ShopSellPanel : MonoBehaviour
     [SerializeField] private Text totalText;
     [SerializeField] private Button sellButton;
     [SerializeField] private Button resetButton;
+    private static readonly SaleItem[] Items =
+    {
+        SaleItem.Wood, SaleItem.Fish, SaleItem.Corn,
+        SaleItem.Pumpkin, SaleItem.Food, SaleItem.Jerimum
+    };
 
     private void Awake()
     {
@@ -43,10 +48,10 @@ public sealed class ShopSellPanel : MonoBehaviour
 
     public void Sell()
     {
-        if (trading == null || rows == null || rows.Length != 7) return;
-        int[] quantities = new int[7];
+        if (trading == null || rows == null || rows.Length != Items.Length) return;
+        int[] quantities = new int[9];
         for (int i = 0; i < rows.Length; i++)
-            quantities[i] = rows[i] == null ? 0 : rows[i].Quantity;
+            quantities[(int)Items[i]] = rows[i] == null ? 0 : rows[i].Quantity;
         if (trading.TrySellBatch(quantities)) ResetSelection();
     }
 
@@ -54,11 +59,11 @@ public sealed class ShopSellPanel : MonoBehaviour
     {
         if (trading == null || rows == null) return;
         long total = 0;
-        for (int i = 0; i < rows.Length; i++)
+        for (int i = 0; i < rows.Length && i < Items.Length; i++)
         {
             ShopQuantityRow row = rows[i];
             if (row == null) continue;
-            SaleItem item = (SaleItem)i;
+            SaleItem item = Items[i];
             int price = trading.GetPrice(item);
             row.SetPrice(price);
             row.SetStock(trading.GetStock(item));

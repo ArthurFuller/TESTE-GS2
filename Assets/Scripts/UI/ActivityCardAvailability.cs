@@ -56,6 +56,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private Vector2 lastContainerSize;
     private int nextCardId;
     public bool HasRoom => shown.Count < maxHandCards || testCards.Count > 0;
+    public int FreeSlots => Mathf.Max(0, maxHandCards - shown.Count + testCards.Count);
 
     private void OnEnable()
     {
@@ -141,18 +142,21 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
                 SetVisible(card, merchant != null && merchant.IsAvailable);
 
         if (CountCards(ActivityKind.PlantCorn) > resources.CornSeeds ||
-            CountCards(ActivityKind.PlantPumpkin) > resources.PumpkinSeeds || shown.Count > maxHandCards)
+            CountCards(ActivityKind.PlantPumpkin) > resources.PumpkinSeeds ||
+            CountCards(ActivityKind.PlantJerimum) > resources.JerimumSeeds || shown.Count > maxHandCards)
         {
             ClearHover(true);
             while (CountCards(ActivityKind.PlantCorn) > resources.CornSeeds) RemoveLast(ActivityKind.PlantCorn);
             while (CountCards(ActivityKind.PlantPumpkin) > resources.PumpkinSeeds) RemoveLast(ActivityKind.PlantPumpkin);
+            while (CountCards(ActivityKind.PlantJerimum) > resources.JerimumSeeds) RemoveLast(ActivityKind.PlantJerimum);
             while (shown.Count > maxHandCards && RemoveLastSeed()) { }
             changed = true;
         }
 
         if (shown.Count < maxHandCards &&
             (CountCards(ActivityKind.PlantCorn) < resources.CornSeeds ||
-             CountCards(ActivityKind.PlantPumpkin) < resources.PumpkinSeeds))
+             CountCards(ActivityKind.PlantPumpkin) < resources.PumpkinSeeds ||
+             CountCards(ActivityKind.PlantJerimum) < resources.JerimumSeeds))
             ClearHover(true);
 
         while (shown.Count < maxHandCards && CountCards(ActivityKind.PlantCorn) < resources.CornSeeds)
@@ -163,6 +167,11 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         while (shown.Count < maxHandCards && CountCards(ActivityKind.PlantPumpkin) < resources.PumpkinSeeds)
         {
             if (!AddCard(ActivityKind.PlantPumpkin, false)) break;
+            changed = true;
+        }
+        while (shown.Count < maxHandCards && CountCards(ActivityKind.PlantJerimum) < resources.JerimumSeeds)
+        {
+            if (!AddCard(ActivityKind.PlantJerimum, false)) break;
             changed = true;
         }
         if (changed) Layout(true);
@@ -178,11 +187,17 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     }
 
     private static bool IsSeed(ActivityKind kind) =>
-        kind == ActivityKind.PlantCorn || kind == ActivityKind.PlantPumpkin;
+        kind == ActivityKind.PlantCorn || kind == ActivityKind.PlantPumpkin ||
+        kind == ActivityKind.PlantJerimum;
 
     private void OnCardUsed(ActivityCardDrag card)
     {
         if (card == null || !shown.Contains(card)) return;
+        if (card.Kind == ActivityKind.BuildFence)
+        {
+            DissolveAndRemove(card);
+            return;
+        }
         if (IsSeed(card.Kind))
         {
             RemoveCard(card);
@@ -196,6 +211,33 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             Color color = graphic.color;
             graphic.color = new Color(color.r * 0.45f, color.g * 0.45f, color.b * 0.45f, color.a);
         }
+    }
+
+    private void DissolveAndRemove(ActivityCardDrag card)
+    {
+        ClearHover(true);
+        shown.Remove(card);
+        Shader shader = Shader.Find("UI/CardDissolve");
+        Graphic[] graphics = card.GetComponentsInChildren<Graphic>(true);
+        var materials = new List<Material>();
+        foreach (Graphic graphic in graphics)
+        {
+            if (graphic == null) continue;
+            if (shader != null)
+            {
+                Material material = new Material(shader);
+                graphic.material = material;
+                materials.Add(material);
+                material.DOFloat(1f, "_Cutoff", 0.45f);
+            }
+            else graphic.DOFade(0f, 0.45f);
+        }
+        DOVirtual.DelayedCall(0.45f, () =>
+        {
+            foreach (Material material in materials) if (material != null) Destroy(material);
+            if (card != null) Destroy(card.gameObject);
+        });
+        Layout(true);
     }
 
     private void UnblockCards()

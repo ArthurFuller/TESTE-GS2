@@ -14,6 +14,10 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Min(2)] private int rounds = 3;
     [SerializeField, Min(0f)] private float targetWidthReduction = 10f;
     [SerializeField, Min(0f)] private float minimumTargetSeparation = 45f;
+    [SerializeField, Min(0f)] private float hitShakeDuration = 0.18f;
+    [SerializeField, Min(0f)] private float hitShakeStrength = 0.12f;
+    [SerializeField, Min(0f)] private float missPunchDuration = 0.2f;
+    [SerializeField, Min(0f)] private float missPunchStrength = 0.12f;
 
     private Action<int> completed;
     private RectTransform bar;
@@ -75,8 +79,19 @@ public sealed class GatheringMinigame : MonoBehaviour
 
         Bounds markerBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, marker);
         Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, greenTarget);
-        if (markerBounds.min.x >= targetBounds.min.x && markerBounds.max.x <= targetBounds.max.x)
+        bool hit = markerBounds.min.x >= targetBounds.min.x && markerBounds.max.x <= targetBounds.max.x;
+        if (hit)
+        {
             hits++;
+            Camera camera = Camera.main;
+            if (camera != null && hitShakeDuration > 0f)
+                camera.transform.DOShakePosition(hitShakeDuration, hitShakeStrength, 12, 90f, false);
+        }
+        else if (bar != null && missPunchDuration > 0f)
+        {
+            bar.DOKill();
+            bar.DOPunchScale(Vector3.one * missPunchStrength, missPunchDuration, 6);
+        }
 
         round++;
         if (round < rounds)
@@ -121,9 +136,9 @@ public sealed class GatheringMinigame : MonoBehaviour
             .SetEase(Ease.InOutCubic).SetLoops(-1, LoopType.Yoyo);
 
         roundStartedAt = Time.unscaledTime;
-        //if (title != null)
-        //    title.text = activityTitle + ": ACERTE O VERDE\n" + (round + 1) + "/" + rounds +
-        //        " · ACERTOS: " + hits;
+        if (title != null)
+            title.text = activityTitle + ": ACERTE O VERDE\n" + (round + 1) + "/" + rounds +
+                " · ACERTOS: " + hits;
     }
 
     private void Hide()

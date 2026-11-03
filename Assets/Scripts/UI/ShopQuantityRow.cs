@@ -16,6 +16,7 @@ public sealed class ShopQuantityRow : MonoBehaviour
     private int quantity;
     private int limit;
     private int unitPrice;
+    private int woodPrice;
     private int stock = -1;
 
     public event Action Changed;
@@ -29,6 +30,7 @@ public sealed class ShopQuantityRow : MonoBehaviour
     }
 
     public void SetPrice(int price) { unitPrice = Mathf.Max(0, price); Refresh(); }
+    public void SetWoodPrice(int price) { woodPrice = Mathf.Max(0, price); Refresh(); }
     public void SetStock(int available) { stock = available; Refresh(); }
     public void SetLimit(int maximum)
     {
@@ -67,7 +69,8 @@ public sealed class ShopQuantityRow : MonoBehaviour
         if (quantityText != null) quantityText.text = quantity.ToString();
         if (amountText != null) amountText.text = ((long)quantity * unitPrice).ToString();
         if (unitPriceText != null)
-            unitPriceText.text = unitPrice + (unitPrice == 1 ? " moeda/un." : " moedas/un.");
+            unitPriceText.text = unitPrice + (unitPrice == 1 ? " moeda" : " moedas") +
+                (woodPrice > 0 ? " + " + woodPrice + " madeiras" : "") + "/un.";
         if (decreaseButton != null) decreaseButton.interactable = quantity > 0;
         if (increaseButton != null) increaseButton.interactable = quantity < limit;
         if (rowGroup != null) rowGroup.alpha = limit == 0 ? 0.42f : 1f;

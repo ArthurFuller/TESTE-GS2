@@ -118,6 +118,14 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         coffeeExcludedActivity = LastActivity;
     }
 
+    public void ReplaceCoffeeWithReplay()
+    {
+        // Replay cancels the pending coffee restriction and leaves two actions.
+        actionsRemaining = 2;
+        coffeeActions = 0;
+        coffeeExcludedActivity = null;
+    }
+
     public void ScheduleExtraAction() => nextDayExtraActions++;
 
     public void BeginNextDay()

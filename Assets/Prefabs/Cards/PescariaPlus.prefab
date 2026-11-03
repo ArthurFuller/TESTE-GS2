@@ -91,7 +91,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ActivityCardDrag
   activityName: Pescaria+
-  description: Pesque de 2 a 4 peixes conforme o resultado do minigame.
+  description: Pesque de 2 a 3 peixes conforme o resultado do minigame.
   activity: 12
   worldCamera: {fileID: 0}
   preview: {fileID: 0}
@@ -240,7 +240,7 @@ MonoBehaviour:
     m_PersistentCalls:
       m_Calls: []
   m_FontData:
-    m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
+    m_Font: {fileID: 12800000, guid: 6b4b9b33ff35a9341912c1d19b4aca09, type: 3}
     m_FontSize: 9
     m_FontStyle: 0
     m_BestFit: 0
@@ -252,4 +252,4 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: Efeito em breve
+  m_Text: 2 a 3 peixes
