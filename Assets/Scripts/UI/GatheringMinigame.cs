@@ -43,10 +43,11 @@ public sealed class GatheringMinigame : MonoBehaviour
         }
 
         completed = onCompleted;
-        activityTitle = activity == ActivityKind.Fish ? "PESCA" : "MADEIRA";
+        bool fishing = activity == ActivityKind.Fish || activity == ActivityKind.FishPlus;
+        activityTitle = fishing ? "PESCA" : "MADEIRA";
         round = 0;
         hits = 0;
-        difficultyMultiplier = activity == ActivityKind.Fish ?
+        difficultyMultiplier = fishing ?
             1f + Mathf.Max(0, fishingDifficulty) * 0.4f : 1f;
         previousTargetCenter = float.NaN;
         if (group != null)

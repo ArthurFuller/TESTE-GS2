@@ -11,7 +11,9 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     [SerializeField] private WorkProgress workProgress;
 
     public static WorkerAssignment Selected { get; private set; }
-    public bool UsedToday { get; private set; }
+    public bool UsedToday => IsUnavailableToday || actionsRemaining <= 0;
+    public int ActionsRemaining => actionsRemaining;
+    public ActivityKind? LastActivity { get; private set; }
     public bool IsUnavailableToday { get; private set; }
     public Vector3 HomePosition { get; private set; }
     public int ProductionReduction { get; private set; }
@@ -23,6 +25,10 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private float nextDayMovementDurationMultiplier = 1f;
     private bool hovered;
     private int absenceDaysRemaining;
+    private int actionsRemaining = 1;
+    private int nextDayExtraActions;
+    private int coffeeActions;
+    private ActivityKind? coffeeExcludedActivity;
 
     private void Awake()
     {
@@ -79,18 +85,50 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
             statusText.text = workerName + ": " + status;
     }
 
-    public void MarkUsed(string activityName)
+    public bool CanAct(ActivityKind activity) => !IsUnavailableToday && actionsRemaining > 0 &&
+        (actionsRemaining > coffeeActions || coffeeExcludedActivity != activity);
+
+    public void MarkUsed(string activityName, ActivityKind activity)
     {
-        UsedToday = true;
+        bool spendingCoffeeAction = coffeeActions > 0 && actionsRemaining <= coffeeActions;
+        actionsRemaining = Mathf.Max(0, actionsRemaining - 1);
+        if (spendingCoffeeAction)
+        {
+            coffeeActions--;
+            if (coffeeActions > 0) coffeeExcludedActivity = activity;
+        }
+        else if (coffeeActions > 0) coffeeExcludedActivity = activity;
+        if (coffeeActions == 0) coffeeExcludedActivity = null;
+        LastActivity = activity;
         Select();
         SetStatus(activityName);
     }
+
+    public void MarkRepeatedAction(string activityName, ActivityKind activity)
+    {
+        LastActivity = activity;
+        Select();
+        SetStatus(activityName);
+    }
+
+    public void GrantCoffeeAction()
+    {
+        actionsRemaining++;
+        coffeeActions++;
+        coffeeExcludedActivity = LastActivity;
+    }
+
+    public void ScheduleExtraAction() => nextDayExtraActions++;
 
     public void BeginNextDay()
     {
         IsUnavailableToday = absenceDaysRemaining > 0;
         if (IsUnavailableToday) absenceDaysRemaining--;
-        UsedToday = IsUnavailableToday;
+        actionsRemaining = IsUnavailableToday ? 0 : 1 + nextDayExtraActions;
+        nextDayExtraActions = 0;
+        coffeeActions = 0;
+        coffeeExcludedActivity = null;
+        LastActivity = null;
         hovered = false;
         ProductionReduction = nextDayProductionReduction;
         MovementDurationMultiplier = nextDayMovementDurationMultiplier;

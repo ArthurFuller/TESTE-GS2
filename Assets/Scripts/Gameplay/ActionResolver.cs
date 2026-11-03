@@ -26,6 +26,8 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField] private Transform villageExit;
     [SerializeField] private Transform fencePassage;
     [SerializeField, Min(0)] private int woodReward = 2;
+    [SerializeField, Min(1)] private int gambleStake = 10;
+    [SerializeField, Min(0.1f)] private float coinTossDuration = 0.65f;
     [SerializeField, Min(0.01f)] private float movementDuration = 0.7f;
     [SerializeField, Min(0.01f)] private float outsideMovementDuration = 7f;
     [SerializeField, Min(0.01f)] private float plowWorkDuration = 1f;
@@ -39,6 +41,7 @@ public sealed class ActionResolver : MonoBehaviour
         public readonly Button Button;
         public readonly Text Label;
         public WorkerAssignment Worker;
+        public ActivityKind SelectedActivity;
         public bool Arrived;
         public bool Started;
         public float StillTime;
@@ -62,6 +65,8 @@ public sealed class ActionResolver : MonoBehaviour
     private GatheringTask forestTask;
     private GatheringTask fishingTask;
     private GatheringTask activeMinigame;
+    private ActivityKind? lastCardKind;
+    private WorkerAssignment lastCardWorker;
 
     public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null ||
         forestTask?.Worker != null || fishingTask?.Worker != null;
@@ -128,13 +133,87 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Esse trabalhador está ausente hoje.");
             return;
         }
-        if (worker.UsedToday)
+        bool replaying = activity == ActivityKind.Replay;
+        if (replaying)
         {
-            feedback.ShowMessage("Esse trabalhador já agiu hoje.");
+            if (lastCardKind == null || !CanReplay(lastCardKind.Value))
+            {
+                feedback.ShowMessage("Replay exige uma última carta de ação válida.");
+                return;
+            }
+            if (lastCardKind == ActivityKind.Coffee)
+            {
+                if (worker != lastCardWorker)
+                {
+                    feedback.ShowMessage("Use Replay no trabalhador que recebeu Cafézinho.");
+                    return;
+                }
+                worker.GrantCoffeeAction();
+                worker.Select();
+                worker.SetStatus("mais uma ação extra disponível");
+                RecordCard(ActivityKind.Replay, worker, card);
+                feedback.ShowMessage("Replay: Cafézinho concedeu mais uma ação extra.");
+                return;
+            }
+            activity = lastCardKind.Value;
+        }
+        if (activity == ActivityKind.Coffee)
+        {
+            worker.GrantCoffeeAction();
+            worker.Select();
+            worker.SetStatus("ação extra disponível");
+            RecordCard(activity, worker, card);
+            feedback.ShowMessage("Cafézinho: uma ação diferente disponível.");
             return;
         }
-        GatheringTask task = activity == ActivityKind.CollectWood ? forestTask :
-            activity == ActivityKind.Fish ? fishingTask : null;
+        if (!replaying && !worker.CanAct(activity))
+        {
+            feedback.ShowMessage(worker.UsedToday ? "Esse trabalhador já agiu hoje." :
+                "Cafézinho exige uma ação diferente.");
+            return;
+        }
+        if (activity == ActivityKind.Gamble)
+        {
+            if (resources == null || !resources.TrySpendCoins(gambleStake))
+            {
+                feedback.ShowMessage("Faltam moedas para a aposta.");
+                return;
+            }
+            CommitAction(worker, activity, activityName, card);
+            worker.SetStatus("lançando moeda");
+            feedback.ShowMessage("Moeda no ar...");
+            busyWorkers++;
+            Sequence toss = DOTween.Sequence();
+            Transform visual = card != null ? card.transform : null;
+            Vector3 original = visual != null ? visual.localEulerAngles : Vector3.zero;
+            if (card != null)
+            {
+                toss.Append(visual.DOLocalRotate(
+                    new Vector3(original.x, original.y + 720f, original.z), coinTossDuration,
+                    RotateMode.FastBeyond360).SetEase(Ease.OutCubic));
+            }
+            else toss.AppendInterval(coinTossDuration);
+            toss.OnComplete(() =>
+            {
+                if (visual != null) visual.localEulerAngles = original;
+                busyWorkers--;
+                bool won = Random.value < 0.5f;
+                if (won) resources.AddCoins(gambleStake * 2);
+                worker.SetStatus(won ? "aposta vencida" : "aposta perdida");
+                feedback.ShowMessage(won ? "Jogo do Bicho: +" + gambleStake + " moedas líquidas." :
+                    "Jogo do Bicho: -" + gambleStake + " moedas.");
+            });
+            return;
+        }
+        if (activity == ActivityKind.Rest)
+        {
+            CommitAction(worker, activity, activityName, card);
+            worker.ScheduleExtraAction();
+            feedback.ShowMessage("Descanso: ação extra amanhã. Alimentação normal hoje.");
+            return;
+        }
+        GatheringTask task = activity == ActivityKind.CollectWood || activity == ActivityKind.WoodPlus ?
+            forestTask : activity == ActivityKind.Fish || activity == ActivityKind.FishPlus ? fishingTask : null;
         if (task != null && task.Worker != null)
         {
             feedback.ShowMessage("Já há um trabalhador nessa área de coleta.");
@@ -156,7 +235,36 @@ public sealed class ActionResolver : MonoBehaviour
             return;
         }
 
+        if (task == null)
+        {
+            feedback.ShowMessage("Essa carta ainda precisa de um alvo válido.");
+            return;
+        }
+
         StartGathering(worker, activity, activityName, card);
+    }
+
+    private void RecordCard(ActivityKind activity, WorkerAssignment worker, ActivityCardDrag card)
+    {
+        lastCardKind = card != null ? card.Kind : activity;
+        lastCardWorker = worker;
+        CardUsed?.Invoke(card);
+    }
+
+    private static bool CanReplay(ActivityKind activity) => activity == ActivityKind.Plow ||
+        activity == ActivityKind.PrepareFood || activity == ActivityKind.CollectWood ||
+        activity == ActivityKind.WoodPlus || activity == ActivityKind.Fish ||
+        activity == ActivityKind.FishPlus || activity == ActivityKind.PlantCorn ||
+        activity == ActivityKind.PlantPumpkin || activity == ActivityKind.Coffee;
+
+    private void CommitAction(WorkerAssignment worker, ActivityKind activity, string name,
+        ActivityCardDrag card)
+    {
+        if (card != null && card.Kind == ActivityKind.Replay)
+            worker.MarkRepeatedAction(name, activity);
+        else
+            worker.MarkUsed(name, activity);
+        RecordCard(activity, worker, card);
     }
 
     private void AssignFoodPreparation(WorkerAssignment worker, ActivityCardDrag card)
@@ -201,7 +309,8 @@ public sealed class ActionResolver : MonoBehaviour
     private void StartGathering(WorkerAssignment worker, ActivityKind activity, string activityName,
         ActivityCardDrag card)
     {
-        GatheringTask task = activity == ActivityKind.CollectWood ? forestTask : fishingTask;
+        GatheringTask task = activity == ActivityKind.CollectWood || activity == ActivityKind.WoodPlus ?
+            forestTask : fishingTask;
         if (task == null || task.Destination == null || villageExit == null ||
             fencePassage == null || resources == null)
         {
@@ -219,8 +328,8 @@ public sealed class ActionResolver : MonoBehaviour
         task.Arrived = false;
         task.Started = false;
         task.StillTime = 0f;
-        worker.MarkUsed(activityName);
-        CardUsed?.Invoke(card);
+        task.SelectedActivity = activity;
+        CommitAction(worker, activity, activityName, card);
         feedback.ShowMessage(activityName + " em andamento. Use o botão para acompanhar.");
         UpdateVisitButton(task);
         MoveToGatheringArea(task);
@@ -235,9 +344,10 @@ public sealed class ActionResolver : MonoBehaviour
             return;
         }
         worker.SetStatus("ação concluída");
-        if (activity == ActivityKind.CollectWood)
+        if (activity == ActivityKind.CollectWood || activity == ActivityKind.WoodPlus)
         {
-            int gained = Mathf.Max(0, woodReward + rating - 1 - worker.ProductionReduction);
+            int gained = activity == ActivityKind.WoodPlus ? 2 + rating : woodReward + rating - 1;
+            gained = Mathf.Max(0, gained - worker.ProductionReduction);
             resources.AddWood(gained);
             if (dayEvents != null) dayEvents.RecordWood(gained);
             WoodGainedToday += gained;
@@ -245,7 +355,8 @@ public sealed class ActionResolver : MonoBehaviour
         }
         else
         {
-            int gained = 2 + rating;
+            int gained = (activity == ActivityKind.FishPlus ? 2 : 1) +
+                (activity == ActivityKind.FishPlus ? rating : Mathf.Min(1, rating));
             resources.AddFish(gained);
             FishGainedToday += gained;
             feedback.ShowMessage("+" + gained + " peixe(s) guardados");
@@ -285,8 +396,7 @@ public sealed class ActionResolver : MonoBehaviour
         }
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
-        worker.MarkUsed("arando");
-        CardUsed?.Invoke(card);
+        CommitAction(worker, ActivityKind.Plow, "arando", card);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
             plot.Plow();
@@ -310,8 +420,7 @@ public sealed class ActionResolver : MonoBehaviour
         }
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
-        worker.MarkUsed("plantando");
-        CardUsed?.Invoke(card);
+        CommitAction(worker, pendingPlotAction, "plantando", card);
         resources.TrySpendSeed(crop);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
@@ -330,8 +439,7 @@ public sealed class ActionResolver : MonoBehaviour
         }
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
-        worker.MarkUsed("colhendo");
-        CardUsed?.Invoke(card);
+        CommitAction(worker, ActivityKind.Harvest, "colhendo", card);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
             int harvestYield = plot.HarvestYield(dayCycle.CurrentDay, seedCatalog);
@@ -349,7 +457,10 @@ public sealed class ActionResolver : MonoBehaviour
 
     public bool ConfirmFoodPreparation(int fish, int corn, int pumpkin)
     {
-        if (pendingFoodWorker == null || pendingFoodWorker.UsedToday || inventoryTrading == null ||
+        if (pendingFoodWorker == null ||
+            (pendingFoodWorker.UsedToday &&
+             (pendingFoodCard == null || pendingFoodCard.Kind != ActivityKind.Replay)) ||
+            inventoryTrading == null ||
             resources == null || foodPreparationDestination == null) return false;
         if (!inventoryTrading.TryPrepare(fish, corn, pumpkin, out int preparedFood))
         {
@@ -360,8 +471,7 @@ public sealed class ActionResolver : MonoBehaviour
         ActivityCardDrag card = pendingFoodCard;
         pendingFoodWorker = null;
         pendingFoodCard = null;
-        worker.MarkUsed("preparando comida");
-        CardUsed?.Invoke(card);
+        CommitAction(worker, ActivityKind.PrepareFood, "preparando comida", card);
         WorkAtStation(worker, foodPreparationDuration, () =>
         {
             resources.AddFood(preparedFood);
@@ -542,7 +652,7 @@ public sealed class ActionResolver : MonoBehaviour
         UpdateVisitButton(fishingTask);
         busyWorkers++;
         worker.SetStatus("atividade interativa");
-        gatheringGame.Begin(activity, rating =>
+        gatheringGame.Begin(task.SelectedActivity, rating =>
         {
             busyWorkers--;
             task.Worker = null;
@@ -551,11 +661,12 @@ public sealed class ActionResolver : MonoBehaviour
             activeMinigame = null;
             communityCamera.SetFollowLocked(false);
             communityCamera.ReturnToCommunity();
-            CompleteGathering(worker, activity, rating);
+            CompleteGathering(worker, task.SelectedActivity, rating);
             SendGatheringWorkerHome(worker);
             UpdateVisitButton(forestTask);
             UpdateVisitButton(fishingTask);
-        }, activity == ActivityKind.Fish && dayEvents != null ? dayEvents.FishingReduction : 0);
+        }, (activity == ActivityKind.Fish || activity == ActivityKind.FishPlus) &&
+            dayEvents != null ? dayEvents.FishingReduction : 0);
     }
 
     private void SendGatheringWorkerHome(WorkerAssignment worker)

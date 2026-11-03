@@ -11007,6 +11007,8 @@ MonoBehaviour:
   villageExit: {fileID: 3000000058}
   fencePassage: {fileID: 3000000060}
   woodReward: 2
+  gambleStake: 10
+  coinTossDuration: 0.65
   movementDuration: 5
   outsideMovementDuration: 7
   plowWorkDuration: 8
@@ -45060,7 +45062,7 @@ MonoBehaviour:
   descriptionPanel: {fileID: 121203684}
   descriptionText: {fileID: 2019803282}
   descriptionGap: 12
-  testCardCount: 10
+  testCardCount: 0
   testCardSource: {fileID: 0}
 --- !u!1 &1817267196
 GameObject:

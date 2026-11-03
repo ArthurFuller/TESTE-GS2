@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,7 +19,52 @@ public sealed class CardRewardChoice : MonoBehaviour
     private readonly ActivityCardDrag[] offered = new ActivityCardDrag[2];
     private readonly Vector2[] homes = new Vector2[2];
     private readonly Image[] glows = new Image[2];
+    private readonly NameStyle[] defaultNames = new NameStyle[2];
     private Action completed;
+
+    private struct NameStyle
+    {
+        public Vector2 Position;
+        public Vector2 Size;
+        public Font Font;
+        public int FontSize;
+        public FontStyle FontStyle;
+        public Color Color;
+        public TextAnchor Alignment;
+        public bool BestFit;
+        public int MinSize;
+        public int MaxSize;
+
+        public NameStyle(Text label)
+        {
+            RectTransform rect = label.rectTransform;
+            Position = rect.anchoredPosition;
+            Size = rect.sizeDelta;
+            Font = label.font;
+            FontSize = label.fontSize;
+            FontStyle = label.fontStyle;
+            Color = label.color;
+            Alignment = label.alignment;
+            BestFit = label.resizeTextForBestFit;
+            MinSize = label.resizeTextMinSize;
+            MaxSize = label.resizeTextMaxSize;
+        }
+
+        public void Apply(Text label)
+        {
+            RectTransform rect = label.rectTransform;
+            rect.anchoredPosition = Position;
+            rect.sizeDelta = Size;
+            label.font = Font;
+            label.fontSize = FontSize;
+            label.fontStyle = FontStyle;
+            label.color = Color;
+            label.alignment = Alignment;
+            label.resizeTextForBestFit = BestFit;
+            label.resizeTextMinSize = MinSize;
+            label.resizeTextMaxSize = MaxSize;
+        }
+    }
 
     private void Awake()
     {
@@ -34,6 +80,8 @@ public sealed class CardRewardChoice : MonoBehaviour
             int index = i;
             choiceButtons[i].onClick.AddListener(() => Choose(index));
         }
+        for (int i = 0; i < choiceNames.Length && i < 2; i++)
+            if (choiceNames[i] != null) defaultNames[i] = new NameStyle(choiceNames[i]);
         Hide();
     }
 
@@ -48,20 +96,24 @@ public sealed class CardRewardChoice : MonoBehaviour
     public void Begin(Action onCompleted)
     {
         completed = onCompleted;
-        if (hand == null || !hand.HasRoom || rewards == null || rewards.Length < 2)
+        var available = new List<ActivityCardDrag>();
+        if (rewards != null)
+            foreach (ActivityCardDrag reward in rewards)
+                if (reward != null && reward.HasEffect) available.Add(reward);
+        if (hand == null || !hand.HasRoom || available.Count < 2)
         {
             completed = null;
             onCompleted?.Invoke();
             return;
         }
-        int first = UnityEngine.Random.Range(0, rewards.Length);
-        int second = UnityEngine.Random.Range(0, rewards.Length - 1);
+        int first = UnityEngine.Random.Range(0, available.Count);
+        int second = UnityEngine.Random.Range(0, available.Count - 1);
         if (second >= first) second++;
-        offered[0] = rewards[first];
-        offered[1] = rewards[second];
+        offered[0] = available[first];
+        offered[1] = available[second];
         for (int i = 0; i < 2; i++)
         {
-            if (choiceNames[i] != null) choiceNames[i].text = offered[i].DisplayName;
+            SetChoiceName(i);
             if (choiceArt[i] != null)
             {
                 Image source = offered[i].GetComponent<Image>();
@@ -81,6 +133,22 @@ public sealed class CardRewardChoice : MonoBehaviour
         group.alpha = 1f;
         group.interactable = true;
         group.blocksRaycasts = true;
+    }
+
+    private void SetChoiceName(int index)
+    {
+        if (choiceNames[index] == null) return;
+        Text label = choiceNames[index];
+        Text cardTitle = null;
+        foreach (Text text in offered[index].GetComponentsInChildren<Text>(true))
+            if (text.gameObject.activeSelf)
+            {
+                cardTitle = text;
+                break;
+            }
+
+        (cardTitle != null ? new NameStyle(cardTitle) : defaultNames[index]).Apply(label);
+        label.text = cardTitle != null ? cardTitle.text : offered[index].DisplayName;
     }
 
     private void Choose(int index)
