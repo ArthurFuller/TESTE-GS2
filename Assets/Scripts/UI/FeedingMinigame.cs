@@ -40,6 +40,7 @@ public sealed class FeedingMinigame : MonoBehaviour
     public void Begin(WorkerAssignment[] dayWorkers, int requiredFood, Action<int[]> onCompleted)
     {
         workers = dayWorkers;
+        EnsureWorkerTargets(workers.Length);
         foodPerWorker = Mathf.Max(1, requiredFood);
         portions = new int[workers.Length];
         completed = onCompleted;
@@ -51,6 +52,22 @@ public sealed class FeedingMinigame : MonoBehaviour
         panel.localScale = Vector3.one * 0.92f;
         panel.DOScale(1f, entranceDuration).SetEase(Ease.OutBack);
         Refresh(true);
+    }
+
+    private void EnsureWorkerTargets(int count)
+    {
+        if (count <= workerTargets.Length || workerTargets.Length == 0) return;
+        int oldCount = workerTargets.Length;
+        Array.Resize(ref workerTargets, count);
+        Array.Resize(ref workerLabels, count);
+        for (int i = oldCount; i < count; i++)
+        {
+            RectTransform target = Instantiate(workerTargets[oldCount - 1], panel);
+            target.name = "Trabalhador " + (i + 1);
+            target.anchoredPosition = new Vector2(0f, -102f - (i - oldCount) * 70f);
+            workerTargets[i] = target;
+            workerLabels[i] = target.GetComponentInChildren<Text>(true);
+        }
     }
 
     public void FeedFromIcon(FeedingFoodIcon icon, PointerEventData eventData)

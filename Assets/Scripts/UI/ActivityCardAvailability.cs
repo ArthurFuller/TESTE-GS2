@@ -130,10 +130,16 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         {
             foreach (ActivityCardDrag card in cards)
             {
-                if (card == null || IsSeed(card.Kind) || card.Kind == ActivityKind.BuySeeds) continue;
+                if (card == null || IsSeed(card.Kind) || card.Kind == ActivityKind.PrepareFood ||
+                    card.Kind == ActivityKind.BuySeeds ||
+                    card.Kind == ActivityKind.BuildHouse || card.Kind == ActivityKind.BuildFence) continue;
                 SetVisible(card, true);
                 shown.Add(card);
             }
+            foreach (ActivityCardDrag card in cards)
+                if (card != null && card.Kind == ActivityKind.PrepareFood)
+                    SetVisible(card, false);
+            AddCard(ActivityKind.PlantCorn, false);
             changed = true;
         }
 
@@ -141,37 +147,10 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             if (card != null && card.Kind == ActivityKind.BuySeeds)
                 SetVisible(card, merchant != null && merchant.IsAvailable);
 
-        if (CountCards(ActivityKind.PlantCorn) > resources.CornSeeds ||
-            CountCards(ActivityKind.PlantPumpkin) > resources.PumpkinSeeds ||
-            CountCards(ActivityKind.PlantJerimum) > resources.JerimumSeeds || shown.Count > maxHandCards)
+        if (shown.Count > maxHandCards)
         {
             ClearHover(true);
-            while (CountCards(ActivityKind.PlantCorn) > resources.CornSeeds) RemoveLast(ActivityKind.PlantCorn);
-            while (CountCards(ActivityKind.PlantPumpkin) > resources.PumpkinSeeds) RemoveLast(ActivityKind.PlantPumpkin);
-            while (CountCards(ActivityKind.PlantJerimum) > resources.JerimumSeeds) RemoveLast(ActivityKind.PlantJerimum);
             while (shown.Count > maxHandCards && RemoveLastSeed()) { }
-            changed = true;
-        }
-
-        if (shown.Count < maxHandCards &&
-            (CountCards(ActivityKind.PlantCorn) < resources.CornSeeds ||
-             CountCards(ActivityKind.PlantPumpkin) < resources.PumpkinSeeds ||
-             CountCards(ActivityKind.PlantJerimum) < resources.JerimumSeeds))
-            ClearHover(true);
-
-        while (shown.Count < maxHandCards && CountCards(ActivityKind.PlantCorn) < resources.CornSeeds)
-        {
-            if (!AddCard(ActivityKind.PlantCorn, false)) break;
-            changed = true;
-        }
-        while (shown.Count < maxHandCards && CountCards(ActivityKind.PlantPumpkin) < resources.PumpkinSeeds)
-        {
-            if (!AddCard(ActivityKind.PlantPumpkin, false)) break;
-            changed = true;
-        }
-        while (shown.Count < maxHandCards && CountCards(ActivityKind.PlantJerimum) < resources.JerimumSeeds)
-        {
-            if (!AddCard(ActivityKind.PlantJerimum, false)) break;
             changed = true;
         }
         if (changed) Layout(true);
@@ -182,6 +161,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         shown.Clear();
         foreach (ActivityCardDrag card in cards)
             if (card != null && card.gameObject.activeSelf && card.Kind != ActivityKind.BuySeeds &&
+                card.Kind != ActivityKind.PrepareFood &&
                 !IsSeed(card.Kind))
                 shown.Add(card);
     }
@@ -193,14 +173,9 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private void OnCardUsed(ActivityCardDrag card)
     {
         if (card == null || !shown.Contains(card)) return;
-        if (card.Kind == ActivityKind.BuildFence)
+        if (card.Kind == ActivityKind.BuildFence || card.Kind == ActivityKind.BuildHouse)
         {
             DissolveAndRemove(card);
-            return;
-        }
-        if (IsSeed(card.Kind))
-        {
-            RemoveCard(card);
             return;
         }
         ClearHover(true);
@@ -296,19 +271,25 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public bool AddCard(ActivityKind kind) => AddCard(kind, true);
 
+    public ActivityCardDrag TemplateFor(ActivityKind kind)
+    {
+        if (cardPrefabs != null)
+            foreach (ActivityCardDrag prefab in cardPrefabs)
+                if (prefab != null && prefab.Kind == kind) return prefab;
+        if (cards != null)
+            foreach (ActivityCardDrag card in cards)
+                if (card != null && card.Kind == kind) return card;
+        return null;
+    }
+
     private bool AddCard(ActivityKind kind, bool arrange)
     {
-        if (cardPrefabs == null) return false;
-        foreach (ActivityCardDrag prefab in cardPrefabs)
-        {
-            if (prefab == null || prefab.Kind != kind) continue;
-            if (shown.Count >= maxHandCards && !RemoveOneTestCard()) return false;
-            ActivityCardDrag copy = Instantiate(prefab, transform.parent);
-            copy.name = prefab.name + " " + ++nextCardId;
-            if (AddCard(copy, arrange)) return true;
-            Destroy(copy.gameObject);
-            return false;
-        }
+        ActivityCardDrag prefab = TemplateFor(kind);
+        if (prefab == null || shown.Count >= maxHandCards && !RemoveOneTestCard()) return false;
+        ActivityCardDrag copy = Instantiate(prefab, transform.parent);
+        copy.name = prefab.name + " " + ++nextCardId;
+        if (AddCard(copy, arrange)) return true;
+        Destroy(copy.gameObject);
         return false;
     }
 

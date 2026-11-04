@@ -4,7 +4,7 @@ using DG.Tweening;
 
 [RequireComponent(typeof(RectTransform))]
 public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler,
-    IPointerEnterHandler, IPointerExitHandler
+    IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
     [SerializeField] private string activityName;
     [SerializeField, TextArea(2, 3)] private string description;
@@ -23,7 +23,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     public ActivityKind Kind => activity;
     public string DisplayName => activityName;
     public string Description => description;
-    public bool HasEffect => activity != ActivityKind.BuildHouse;
+    public bool HasEffect => true;
 
     public void ConfigureRuntime(Camera camera, DragCursorPreview cursorPreview)
     {
@@ -57,6 +57,13 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     }
 
     public void OnPointerExit(PointerEventData eventData) => RestoreHover(false);
+
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (eventData.dragging || activity != ActivityKind.BuildHouse) return;
+        WorkerAssignment worker = WorkerAssignment.Selected;
+        if (worker != null) worker.TryAssign(activity, activityName, this);
+    }
 
     public void OnBeginDrag(PointerEventData eventData)
     {

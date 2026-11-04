@@ -91,7 +91,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ActivityCardDrag
   activityName: Construir Casa
-  description: Carta sem efeito nesta etapa.
+  description: Escolha um lote livre para construir uma casa e receber um trabalhador.
   activity: 17
   worldCamera: {fileID: 0}
   preview: {fileID: 0}
