@@ -124,8 +124,8 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
 
     private void GenerateOffers()
     {
-        var pool = new List<DeliveryItem> { DeliveryItem.Wood, DeliveryItem.Food, DeliveryItem.CornSeeds,
-            DeliveryItem.Fish, DeliveryItem.Corn, DeliveryItem.PumpkinSeeds, DeliveryItem.Pumpkin };
+        var pool = new List<DeliveryItem> { DeliveryItem.Wood, DeliveryItem.Food,
+            DeliveryItem.Fish, DeliveryItem.Corn, DeliveryItem.Pumpkin };
         int count = Mathf.Clamp(UnityEngine.Random.Range(minimumOffers, maximumOffers + 1), 1, pool.Count);
         int returning = Mathf.Min(returningOffersPerMarket, Mathf.Min(count, returningOffers.Count));
         for (int i = 0; i < returning; i++)

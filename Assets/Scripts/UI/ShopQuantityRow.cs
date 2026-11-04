@@ -22,6 +22,12 @@ public sealed class ShopQuantityRow : MonoBehaviour
     public event Action Changed;
     public int Quantity => quantity;
 
+    public void SetItemName(string name)
+    {
+        itemName = name;
+        Refresh();
+    }
+
     private void Awake()
     {
         if (decreaseButton != null) decreaseButton.onClick.AddListener(Decrease);

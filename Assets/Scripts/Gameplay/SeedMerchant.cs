@@ -20,8 +20,11 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
     [SerializeField] private ShopTabs shopTabs;
     [SerializeField] private ActivityCardAvailability hand;
+    [SerializeField] private HouseSite houseSite;
     [SerializeField, Min(0)] private int fenceWoodCost = 8;
     [SerializeField, Min(0)] private int fenceCoinCost = 8;
+    [SerializeField, Min(0)] private int houseWoodCost = 16;
+    [SerializeField, Min(0)] private int houseCoinCost = 16;
     [SerializeField] private int[] marketDays = { 1, 4, 7, 10 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
@@ -33,6 +36,11 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     public int FenceWoodCost => fenceWoodCost;
     public int FenceCoinCost => fenceCoinCost;
     public int FenceSlotsAvailable => hand != null ? hand.FreeSlots : 0;
+    public int HouseWoodCost => houseWoodCost;
+    public int HouseCoinCost => houseCoinCost;
+    public int HouseSlotsAvailable => !housePurchased && houseSite != null && !houseSite.IsBuilt &&
+        hand != null && hand.HasRoom ? 1 : 0;
+    private bool housePurchased;
 
     private void Awake() => HideShop();
     public void OnPointerClick(PointerEventData eventData) => RequestVisit(WorkerAssignment.Selected);
@@ -96,32 +104,33 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         };
     }
 
-    public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int jerimumSeeds, int food, int fences)
+    public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int jerimumSeeds, int food, int fences,
+        int houses = 0)
     {
         if (!IsAvailable || !IsOpen || dayCycle == null || !dayCycle.CanAcceptActions || resources == null ||
             catalog == null ||
-            cornSeeds < 0 || pumpkinSeeds < 0 || jerimumSeeds < 0 || food < 0 || fences < 0 ||
-            fences > FenceSlotsAvailable || resources.Wood < fences * fenceWoodCost) return false;
-        long total = (long)cornSeeds * GetUnitPrice(SaleItem.CornSeeds) +
-            (long)pumpkinSeeds * GetUnitPrice(SaleItem.PumpkinSeeds) +
-            (long)jerimumSeeds * GetUnitPrice(SaleItem.JerimumSeeds) +
-            (long)food * GetUnitPrice(SaleItem.Food) + (long)fences * fenceCoinCost;
+            cornSeeds != 0 || pumpkinSeeds != 0 || jerimumSeeds != 0 || food < 0 || fences < 0 ||
+            houses < 0 || houses > HouseSlotsAvailable ||
+            fences + houses > FenceSlotsAvailable ||
+            resources.Wood < fences * fenceWoodCost + houses * houseWoodCost) return false;
+        long total = (long)food * GetUnitPrice(SaleItem.Food) + (long)fences * fenceCoinCost +
+            (long)houses * houseCoinCost;
         if (total <= 0 || total > int.MaxValue || !resources.TrySpendCoins((int)total))
         {
             if (feedback != null) feedback.ShowMessage("Moedas insuficientes para a compra.");
             return false;
         }
-        if (cornSeeds > 0) resources.AddSeeds(CropType.Corn,
-            cornSeeds * catalog.Get(CropType.Corn).seedsPerPurchase);
-        if (pumpkinSeeds > 0) resources.AddSeeds(CropType.Pumpkin,
-            pumpkinSeeds * catalog.Get(CropType.Pumpkin).seedsPerPurchase);
-        if (jerimumSeeds > 0) resources.AddSeeds(CropType.Jerimum,
-            jerimumSeeds * catalog.Get(CropType.Jerimum).seedsPerPurchase);
         if (food > 0) resources.AddFood(food);
         if (fences > 0)
         {
             resources.TrySpendWood(fences * fenceWoodCost);
             for (int i = 0; i < fences; i++) hand.AddCard(ActivityKind.BuildFence);
+        }
+        if (houses > 0)
+        {
+            resources.TrySpendWood(houses * houseWoodCost);
+            hand.AddCard(ActivityKind.BuildHouse);
+            housePurchased = true;
         }
         if (feedback != null) feedback.ShowMessage("Compra concluída: -" + total + " moedas.");
         return true;

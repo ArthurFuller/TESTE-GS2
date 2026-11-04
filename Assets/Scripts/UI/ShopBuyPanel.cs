@@ -10,6 +10,7 @@ public sealed class ShopBuyPanel : MonoBehaviour
     [SerializeField] private ShopQuantityRow jerimumRow;
     [SerializeField] private ShopQuantityRow foodRow;
     [SerializeField] private ShopQuantityRow fenceRow;
+    [SerializeField] private ShopQuantityRow houseRow;
     [SerializeField] private Text totalText;
     [SerializeField] private Button buyButton;
     [SerializeField] private Button resetButton;
@@ -17,7 +18,7 @@ public sealed class ShopBuyPanel : MonoBehaviour
 
     private void Awake()
     {
-        rows = new[] { cornRow, pumpkinRow, jerimumRow, foodRow, fenceRow };
+        rows = new[] { foodRow, fenceRow, houseRow };
         if (buyButton != null) buyButton.onClick.AddListener(Buy);
         if (resetButton != null) resetButton.onClick.AddListener(ResetSelection);
     }
@@ -46,49 +47,57 @@ public sealed class ShopBuyPanel : MonoBehaviour
 
     public void Buy()
     {
-        if (merchant == null || cornRow == null || pumpkinRow == null || jerimumRow == null ||
-            foodRow == null || fenceRow == null) return;
-        if (merchant.TryBuyCart(cornRow.Quantity, pumpkinRow.Quantity, jerimumRow.Quantity,
-            foodRow.Quantity, fenceRow.Quantity)) ResetSelection();
+        if (merchant == null || foodRow == null || fenceRow == null || houseRow == null) return;
+        if (merchant.TryBuyCart(0, 0, 0, foodRow.Quantity, fenceRow.Quantity,
+            houseRow.Quantity)) ResetSelection();
     }
 
     public void Refresh()
     {
-        if (merchant == null || resources == null || cornRow == null || pumpkinRow == null ||
-            jerimumRow == null || foodRow == null || fenceRow == null) return;
+        if (merchant == null || resources == null || foodRow == null || fenceRow == null ||
+            houseRow == null) return;
         int[] prices = {
-            merchant.GetUnitPrice(SaleItem.CornSeeds),
-            merchant.GetUnitPrice(SaleItem.PumpkinSeeds),
-            merchant.GetUnitPrice(SaleItem.JerimumSeeds),
             merchant.GetUnitPrice(SaleItem.Food),
-            merchant.FenceCoinCost
+            merchant.FenceCoinCost,
+            merchant.HouseCoinCost
         };
         int budget = resources.Coins;
         int woodBudget = resources.Wood;
         for (int i = 0; i < rows.Length; i++)
         {
             rows[i].SetPrice(prices[i]);
-            rows[i].SetWoodPrice(i == 4 ? merchant.FenceWoodCost : 0);
+            rows[i].SetWoodPrice(i == 1 ? merchant.FenceWoodCost :
+                i == 2 ? merchant.HouseWoodCost : 0);
             int limit = prices[i] > 0 ? budget / prices[i] : 0;
-            if (i == 4)
+            if (i == 1)
                 limit = Mathf.Min(limit, merchant.FenceWoodCost > 0 ?
                     woodBudget / merchant.FenceWoodCost : int.MaxValue, merchant.FenceSlotsAvailable);
+            if (i == 2)
+                limit = Mathf.Min(limit, merchant.HouseWoodCost > 0 ?
+                    woodBudget / merchant.HouseWoodCost : int.MaxValue, merchant.HouseSlotsAvailable);
             rows[i].SetLimit(limit);
             budget -= rows[i].Quantity * prices[i];
-            if (i == 4) woodBudget -= rows[i].Quantity * merchant.FenceWoodCost;
+            woodBudget -= rows[i].Quantity * (i == 1 ? merchant.FenceWoodCost :
+                i == 2 ? merchant.HouseWoodCost : 0);
         }
         int total = resources.Coins - budget;
         for (int i = 0; i < rows.Length; i++)
         {
             int limit = prices[i] > 0 ? rows[i].Quantity + budget / prices[i] : 0;
-            if (i == 4)
+            if (i == 1)
                 limit = Mathf.Min(limit, rows[i].Quantity +
                     (merchant.FenceWoodCost > 0 ? woodBudget / merchant.FenceWoodCost : int.MaxValue),
                     merchant.FenceSlotsAvailable);
+            if (i == 2)
+                limit = Mathf.Min(limit, rows[i].Quantity +
+                    (merchant.HouseWoodCost > 0 ? woodBudget / merchant.HouseWoodCost : int.MaxValue),
+                    merchant.HouseSlotsAvailable);
             rows[i].SetLimit(limit);
         }
         if (totalText != null) totalText.text = "TOTAL: " + total + " moedas" +
-            (fenceRow.Quantity > 0 ? " + " + fenceRow.Quantity * merchant.FenceWoodCost + " madeiras" : "");
+            (fenceRow.Quantity + houseRow.Quantity > 0 ? " + " +
+                (fenceRow.Quantity * merchant.FenceWoodCost +
+                 houseRow.Quantity * merchant.HouseWoodCost) + " madeiras" : "");
         if (buyButton != null) buyButton.interactable = total > 0 && merchant.IsAvailable;
     }
 }
