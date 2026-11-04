@@ -26,6 +26,21 @@ public sealed class DayEventController : MonoBehaviour
     private int forestExploitation;
 
     public bool IsPanelOpen => card != null && card.IsOpen;
+
+    public void AfterEventCardClosed(System.Action action)
+    {
+        if (card == null || !card.IsOpen)
+        {
+            action?.Invoke();
+            return;
+        }
+        void OnClosed()
+        {
+            card.Closed -= OnClosed;
+            action?.Invoke();
+        }
+        card.Closed += OnClosed;
+    }
     public int FishingReduction => activeGeneralEvent == SertaoEventKind.Drought ? droughtFishingReduction : 0;
     public int HarvestReduction => activeGeneralEvent == SertaoEventKind.Pests ? pestHarvestReduction : 0;
 

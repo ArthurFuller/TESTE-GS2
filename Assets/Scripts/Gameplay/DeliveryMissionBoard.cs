@@ -19,6 +19,7 @@ public sealed class DeliveryMission
 public sealed class DeliveryMissionBoard : MonoBehaviour
 {
     [SerializeField] private ResourceBank resources;
+    [SerializeField] private ResourceHud resourceHud;
     [SerializeField] private GameFeedback feedback;
     [SerializeField] private Text orderText;
     [SerializeField] private Button acceptButton;
@@ -116,6 +117,9 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             return;
         }
         resources.AddCoins(mission.coinReward);
+        if (resourceHud != null && deliverButton != null)
+            resourceHud.FlyFromRect(ResourceKind.Coins, mission.coinReward,
+                deliverButton.transform as RectTransform);
         if (feedback != null) feedback.ShowMessage("Entrega concluída! +" + mission.coinReward + " moedas.");
         missions.RemoveAt(index);
         selectedIndex = Mathf.Clamp(selectedIndex, 0, Mathf.Max(0, missions.Count - 1));

@@ -7,9 +7,11 @@ using UnityEngine.UI;
 public sealed class DayCycle : MonoBehaviour
 {
     [SerializeField] private ResourceBank resources;
+    [SerializeField] private ResourceHud resourceHud;
     [SerializeField] private ActionResolver actions;
     [SerializeField] private GameFeedback feedback;
     [SerializeField] private WorkerAssignment[] workers;
+    [SerializeField] private HouseSite[] houseSites;
     [SerializeField] private Plot[] plots;
     [SerializeField] private SeedCatalog seedCatalog;
     [SerializeField] private SeedMerchant merchant;
@@ -24,7 +26,6 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField, Min(1)] private int totalDays = 12;
     [SerializeField, Min(1)] private int milkPerCow = 1;
     [SerializeField, Min(1)] private int eggsPerChicken = 1;
-    [SerializeField, Min(1f)] private float noFoodMovementDurationMultiplier = 1.3333334f;
 
     private int currentDay = 1;
     private bool summaryOpen;
@@ -43,8 +44,7 @@ public sealed class DayCycle : MonoBehaviour
         eggs = todayEggs;
         if (milk + eggs == 0 || resources == null) return false;
         resources.AddAnimalProducts(milk, eggs);
-        foreach (Plot plot in plots)
-            if (plot != null && plot.Animal != AnimalKind.None) plot.PulseAnimal();
+        AnimateAnimalGains();
         return true;
     }
 
@@ -57,12 +57,29 @@ public sealed class DayCycle : MonoBehaviour
             if (plot == null) continue;
             if (plot.Animal == AnimalKind.Cow) todayMilk += milkPerCow;
             if (plot.Animal == AnimalKind.Chicken) todayEggs += eggsPerChicken;
-            if (plot.Animal != AnimalKind.None) plot.PulseAnimal();
         }
-        if (todayMilk + todayEggs == 0) return;
+    }
+
+    private void AddDailyAnimalResources()
+    {
+        if (todayMilk + todayEggs == 0 || resources == null) return;
         resources.AddAnimalProducts(todayMilk, todayEggs);
+        AnimateAnimalGains();
         if (feedback != null)
             feedback.ShowMessage("Animais: +" + todayMilk + " leite e +" + todayEggs + " ovos.");
+    }
+
+    private void AnimateAnimalGains()
+    {
+        foreach (Plot plot in plots)
+        {
+            if (plot == null || plot.Animal == AnimalKind.None) continue;
+            plot.PulseAnimal();
+            if (resourceHud == null) continue;
+            ResourceKind kind = plot.Animal == AnimalKind.Cow ? ResourceKind.Milk : ResourceKind.Eggs;
+            int amount = plot.Animal == AnimalKind.Cow ? milkPerCow : eggsPerChicken;
+            resourceHud.FlyFromWorld(kind, amount, plot.transform.position + Vector3.up);
+        }
     }
     public event Action DayChanged;
 
@@ -125,17 +142,14 @@ public sealed class DayCycle : MonoBehaviour
             {
                 prepared++;
                 worker.ScheduleExtraAction();
-                worker.ScheduleNextDayCondition(0, 1f);
             }
             else if (received.HasValue)
             {
                 raw++;
-                worker.ScheduleNextDayCondition(0, 1f);
             }
             else
             {
                 unfed++;
-                worker.ScheduleNextDayCondition(0, noFoodMovementDurationMultiplier);
             }
         }
 
@@ -180,10 +194,23 @@ public sealed class DayCycle : MonoBehaviour
 
         summaryOpen = false;
         currentDay++;
-        resources.AdvanceFoodDay(currentDay);
         ProduceAnimalResources();
         if (dayEvents != null) dayEvents.StartDay(currentDay);
         actions.BeginNextDay();
+        if (houseSites != null)
+        {
+            foreach (HouseSite site in houseSites)
+            {
+                if (site == null) continue;
+                WorkerAssignment resident = site.CreateResident(currentDay);
+                if (resident == null) continue;
+                RegisterWorker(resident);
+                actions.RegisterWorker(resident);
+                if (dayEvents != null) dayEvents.RegisterWorker(resident);
+                resident.BeginNextDay();
+                actions.BringWorkerOutOfHouse(resident, site.DoorwayPosition);
+            }
+        }
         foreach (Plot plot in plots)
             if (plot != null) plot.RefreshGrowth(currentDay, seedCatalog);
         UpdateMarket();
@@ -192,6 +219,8 @@ public sealed class DayCycle : MonoBehaviour
         if (finishDayButton != null) finishDayButton.interactable = true;
         UpdateDayLabel();
         DayChanged?.Invoke();
+        if (dayEvents != null) dayEvents.AfterEventCardClosed(AddDailyAnimalResources);
+        else AddDailyAnimalResources();
     }
 
     private void UpdateMarket()

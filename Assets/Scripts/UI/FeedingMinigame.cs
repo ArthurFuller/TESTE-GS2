@@ -78,18 +78,20 @@ public sealed class FeedingMinigame : MonoBehaviour
     private void LayoutWorkerTargets()
     {
         int count = Mathf.Min(workers.Length, workerTargets.Length);
+        float width = count >= 4 ? 126f : 168f;
+        float spacing = count >= 4 ? 136f : 178f;
         for (int i = 0; i < count; i++)
         {
             RectTransform target = workerTargets[i];
             if (target == null) continue;
-            target.anchoredPosition = new Vector2((i - (count - 1) * 0.5f) * 178f, -80f);
-            target.sizeDelta = new Vector2(168f, 72f);
+            target.anchoredPosition = new Vector2((i - (count - 1) * 0.5f) * spacing, -80f);
+            target.sizeDelta = new Vector2(width, 72f);
             if (workerLabels[i] == null) continue;
-            workerLabels[i].rectTransform.sizeDelta = new Vector2(152f, 60f);
-            workerLabels[i].fontSize = 14;
+            workerLabels[i].rectTransform.sizeDelta = new Vector2(width - 16f, 60f);
+            workerLabels[i].fontSize = count >= 4 ? 12 : 14;
             workerLabels[i].resizeTextForBestFit = true;
             workerLabels[i].resizeTextMinSize = 11;
-            workerLabels[i].resizeTextMaxSize = 14;
+            workerLabels[i].resizeTextMaxSize = count >= 4 ? 12 : 14;
         }
     }
 

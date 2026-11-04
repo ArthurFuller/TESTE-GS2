@@ -5,6 +5,7 @@ public sealed class ShopSellPanel : MonoBehaviour
 {
     [SerializeField] private InventoryTrading trading;
     [SerializeField] private ResourceBank resources;
+    [SerializeField] private ResourceHud resourceHud;
     [SerializeField] private ShopQuantityRow[] rows;
     [SerializeField] private Text totalText;
     [SerializeField] private Button sellButton;
@@ -52,7 +53,15 @@ public sealed class ShopSellPanel : MonoBehaviour
         int[] quantities = new int[9];
         for (int i = 0; i < rows.Length; i++)
             quantities[(int)Items[i]] = rows[i] == null ? 0 : rows[i].Quantity;
-        if (trading.TrySellBatch(quantities)) ResetSelection();
+        long coins = 0;
+        for (int i = 0; i < rows.Length; i++)
+            coins += (long)quantities[(int)Items[i]] * trading.GetPrice(Items[i]);
+        if (trading.TrySellBatch(quantities))
+        {
+            if (resourceHud != null && sellButton != null && coins > 0 && coins <= int.MaxValue)
+                resourceHud.FlyFromRect(ResourceKind.Coins, (int)coins, sellButton.transform as RectTransform);
+            ResetSelection();
+        }
     }
 
     public void RefreshDisplay()

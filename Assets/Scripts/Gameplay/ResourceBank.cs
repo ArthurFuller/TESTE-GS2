@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 public sealed class ResourceBank : MonoBehaviour
@@ -18,15 +17,6 @@ public sealed class ResourceBank : MonoBehaviour
     [SerializeField, Min(0), InspectorName("Sementes de macaxeira")] private int startingPumpkinSeeds;
     [SerializeField, Min(0), InspectorName("Sementes de jerimum")] private int startingJerimumSeeds;
 
-    private sealed class FoodBatch
-    {
-        public int Amount;
-        public int ExpiresOnDay;
-    }
-
-    private readonly List<FoodBatch> foodBatches = new List<FoodBatch>();
-    private int currentDay = 1;
-
     public int Wood { get; private set; }
     public int Food { get; private set; }
     public int Coins { get; private set; }
@@ -43,11 +33,8 @@ public sealed class ResourceBank : MonoBehaviour
 
     private void Awake()
     {
-        currentDay = 1;
         Wood = startingWood;
         Food = startingFood;
-        foodBatches.Clear();
-        if (Food > 0) foodBatches.Add(new FoodBatch { Amount = Food, ExpiresOnDay = 3 });
         Coins = startingCoins;
         CornSeeds = startingCornSeeds;
         PumpkinSeeds = startingPumpkinSeeds;
@@ -69,25 +56,8 @@ public sealed class ResourceBank : MonoBehaviour
     public void AddFood(int amount)
     {
         amount = Mathf.Max(0, amount);
-        if (amount > 0)
-        {
-            Food += amount;
-            foodBatches.Add(new FoodBatch { Amount = amount, ExpiresOnDay = currentDay + 2 });
-        }
+        Food += amount;
         Changed?.Invoke();
-    }
-
-    public void AdvanceFoodDay(int day)
-    {
-        currentDay = day;
-        int before = Food;
-        for (int i = foodBatches.Count - 1; i >= 0; i--)
-            if (day >= foodBatches[i].ExpiresOnDay)
-            {
-                Food -= foodBatches[i].Amount;
-                foodBatches.RemoveAt(i);
-            }
-        if (Food != before) Changed?.Invoke();
     }
 
     public void AddFish(int amount) { Fish += Mathf.Max(0, amount); Changed?.Invoke(); }
@@ -114,19 +84,22 @@ public sealed class ResourceBank : MonoBehaviour
         Changed?.Invoke();
     }
 
-    public bool TryPrepareFood(int fish, int corn, int pumpkin, int jerimum,
-        int foodPerFish, int foodPerCorn, int foodPerPumpkin, int foodPerJerimum,
-        out int preparedFood)
+    public bool TryPrepareFood(int fish, int corn, int pumpkin, int jerimum, int milk, int eggs,
+        int recipeYield, out int preparedFood)
     {
         preparedFood = 0;
-        if (fish < 0 || corn < 0 || pumpkin < 0 || jerimum < 0 || fish > Fish || corn > Corn ||
-            pumpkin > Pumpkin || jerimum > Jerimum || fish + corn + pumpkin + jerimum == 0) return false;
+        if (fish < 0 || corn < 0 || pumpkin < 0 || jerimum < 0 || milk < 0 || eggs < 0 ||
+            fish > Fish || corn > Corn || pumpkin > Pumpkin || jerimum > Jerimum ||
+            milk > Milk || eggs > Eggs ||
+            (long)fish + corn + pumpkin + jerimum + milk + eggs == 0 || recipeYield <= 0 ||
+            recipeYield > int.MaxValue - Food) return false;
         Fish -= fish;
         Corn -= corn;
         Pumpkin -= pumpkin;
         Jerimum -= jerimum;
-        preparedFood = fish * Mathf.Max(0, foodPerFish) + corn * Mathf.Max(0, foodPerCorn) +
-            pumpkin * Mathf.Max(0, foodPerPumpkin) + jerimum * Mathf.Max(0, foodPerJerimum);
+        Milk -= milk;
+        Eggs -= eggs;
+        preparedFood = recipeYield;
         Changed?.Invoke();
         return true;
     }
@@ -192,14 +165,6 @@ public sealed class ResourceBank : MonoBehaviour
     private void RemoveFood(int amount)
     {
         Food -= amount;
-        for (int i = 0; i < foodBatches.Count && amount > 0;)
-        {
-            int taken = Mathf.Min(amount, foodBatches[i].Amount);
-            foodBatches[i].Amount -= taken;
-            amount -= taken;
-            if (foodBatches[i].Amount == 0) foodBatches.RemoveAt(i);
-            else i++;
-        }
     }
 
     public void AddCoins(int amount)

@@ -23,6 +23,7 @@ public sealed class CardRewardChoice : MonoBehaviour
     private readonly Image[] glows = new Image[2];
     private readonly bool[] rerolled = new bool[2];
     private readonly List<ActivityCardDrag> available = new List<ActivityCardDrag>();
+    private readonly HashSet<ActivityKind> chosenKinds = new HashSet<ActivityKind>();
     private readonly NameStyle[] defaultNames = new NameStyle[2];
     private Action completed;
     private int currentDay;
@@ -164,7 +165,7 @@ public sealed class CardRewardChoice : MonoBehaviour
     private void AddAvailable(ActivityCardDrag card)
     {
         if (card == null || !card.HasEffect || card.Kind == ActivityKind.BuildHouse ||
-            card.Kind == ActivityKind.BuildFence) return;
+            card.Kind == ActivityKind.BuildFence || chosenKinds.Contains(card.Kind)) return;
         foreach (ActivityCardDrag existing in available)
             if (existing.Kind == card.Kind) return;
         available.Add(card);
@@ -231,6 +232,7 @@ public sealed class CardRewardChoice : MonoBehaviour
     {
         if (completed == null || index < 0 || index >= 2 || offered[index] == null) return;
         if (!hand.AddCard(offered[index].Kind)) return;
+        chosenKinds.Add(offered[index].Kind);
         Hide();
         Action callback = completed;
         completed = null;

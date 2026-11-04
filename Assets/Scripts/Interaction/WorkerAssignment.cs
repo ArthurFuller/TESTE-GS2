@@ -19,12 +19,11 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     public bool IsUnavailableToday { get; private set; }
     public Vector3 HomePosition { get; private set; }
     public int ProductionReduction { get; private set; }
-    public float MovementDurationMultiplier { get; private set; } = 1f;
     public WorkProgress Progress => workProgress;
     public string DisplayName => workerName;
+    public int AssignmentVersion => actionResolver != null ? actionResolver.AssignmentVersion : 0;
 
     private int nextDayProductionReduction;
-    private float nextDayMovementDurationMultiplier = 1f;
     private bool hovered;
     private int absenceDaysRemaining;
     private int actionsRemaining = 1;
@@ -153,11 +152,14 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     {
         if (statusText != null)
         {
+            float bottom = statusText.rectTransform.anchoredPosition.y;
+            foreach (Text existing in statusText.transform.parent.GetComponentsInChildren<Text>(false))
+                bottom = Mathf.Min(bottom, existing.rectTransform.anchoredPosition.y);
             statusText = Instantiate(statusText, statusText.transform.parent);
             statusText.name = "Status - " + name;
             RectTransform label = statusText.rectTransform;
             label.anchoredPosition = new Vector2(label.anchoredPosition.x,
-                label.anchoredPosition.y - label.rect.height - 2f);
+                bottom - label.rect.height - 2f);
             RectTransform background = label.parent as RectTransform;
             if (background != null)
                 background.sizeDelta = new Vector2(background.sizeDelta.x,
@@ -188,11 +190,9 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         LastActivity = null;
         hovered = false;
         ProductionReduction = nextDayProductionReduction;
-        MovementDurationMultiplier = nextDayMovementDurationMultiplier;
         nextDayProductionReduction = 0;
-        nextDayMovementDurationMultiplier = 1f;
         SetStatus(IsUnavailableToday ? "ausente" : ProductionReduction > 0 ? "produção reduzida" :
-            MovementDurationMultiplier > 1f ? "movimento lento" : "livre");
+            "livre");
         if (selectionMarker != null)
             selectionMarker.SetActive(false);
         if (Selected == this)
@@ -204,10 +204,9 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         absenceDaysRemaining = Mathf.Max(absenceDaysRemaining, days);
     }
 
-    public void ScheduleNextDayCondition(int productionReduction, float movementDurationMultiplier)
+    public void ScheduleNextDayCondition(int productionReduction)
     {
         nextDayProductionReduction = Mathf.Max(0, productionReduction);
-        nextDayMovementDurationMultiplier = Mathf.Max(1f, movementDurationMultiplier);
     }
 
     private void RefreshActionDots(bool animate)

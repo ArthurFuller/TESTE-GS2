@@ -1,19 +1,17 @@
 using System;
 using DG.Tweening;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
+public sealed class SeedMerchant : MonoBehaviour
 {
     [SerializeField] private ResourceBank resources;
+    [SerializeField] private ResourceHud resourceHud;
     [SerializeField] private SeedCatalog catalog;
-    [SerializeField] private ActionResolver actions;
     [SerializeField] private DayCycle dayCycle;
     [SerializeField] private GameFeedback feedback;
     [SerializeField] private GameObject stallVisual;
     [SerializeField] private GameObject closedStallLock;
-    [SerializeField] private Transform stallDestination;
     [SerializeField] private CanvasGroup shopGroup;
     [SerializeField] private Text shopStatusText;
     [SerializeField] private DragCursorPreview dragPreview;
@@ -21,6 +19,7 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private ShopTabs shopTabs;
     [SerializeField] private ActivityCardAvailability hand;
     [SerializeField] private HouseSite houseSite;
+    [SerializeField] private HouseSite secondHouseSite;
     [SerializeField, Min(0)] private int fenceWoodCost = 8;
     [SerializeField, Min(0)] private int fenceCoinCost = 8;
     [SerializeField, Min(0)] private int houseWoodCost = 16;
@@ -28,7 +27,6 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     [SerializeField] private int[] marketDays = { 1, 4, 7, 10 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
-    [SerializeField, Min(0.01f)] private float arrivalRadius = 0.55f;
 
     public event Action AvailabilityChanged;
     public bool IsAvailable { get; private set; }
@@ -38,12 +36,23 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
     public int FenceSlotsAvailable => hand != null ? hand.FreeSlots : 0;
     public int HouseWoodCost => houseWoodCost;
     public int HouseCoinCost => houseCoinCost;
-    public int HouseSlotsAvailable => !housePurchased && houseSite != null && !houseSite.IsBuilt &&
-        hand != null && hand.HasRoom ? 1 : 0;
-    private bool housePurchased;
+    public int HouseSlotsAvailable => hand == null ? 0 : Mathf.Min(hand.FreeSlots,
+        Mathf.Max(0, (houseSite != null ? 1 : 0) + (secondHouseSite != null ? 1 : 0) - housesPurchased),
+        (houseSite != null && !houseSite.IsBuilt ? 1 : 0) +
+        (secondHouseSite != null && !secondHouseSite.IsBuilt ? 1 : 0));
+    private int housesPurchased;
 
     private void Awake() => HideShop();
-    public void OnPointerClick(PointerEventData eventData) => RequestVisit(WorkerAssignment.Selected);
+    public void ToggleShop()
+    {
+        if (!IsAvailable || dayCycle == null || !dayCycle.CanAcceptActions)
+        {
+            if (feedback != null) feedback.ShowMessage("A barraca está fechada hoje.");
+            return;
+        }
+        if (IsOpen) HideShop();
+        else ShowShop();
+    }
 
     public void SetDay(int day, bool hasDeliveryDue = false)
     {
@@ -53,42 +62,6 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         if (closedStallLock != null) closedStallLock.SetActive(!IsAvailable);
         HideShop();
         AvailabilityChanged?.Invoke();
-    }
-
-    public void RequestVisit(WorkerAssignment worker)
-    {
-        if (dayCycle == null || !dayCycle.CanAcceptActions) return;
-        if (!IsAvailable)
-        {
-            if (feedback != null) feedback.ShowMessage("A barraca está fechada hoje.");
-            return;
-        }
-        if (worker == null)
-        {
-            if (feedback != null) feedback.ShowMessage("Selecione um trabalhador para visitar a barraca.");
-            return;
-        }
-        if (worker.IsUnavailableToday)
-        {
-            if (feedback != null) feedback.ShowMessage("Esse trabalhador está ausente hoje.");
-            return;
-        }
-        if (actions == null || stallDestination == null)
-        {
-            if (feedback != null) feedback.ShowMessage("Barraca não configurada.");
-            return;
-        }
-        if (actions.IsWorkerStoppedNear(worker, stallDestination.position, arrivalRadius))
-        {
-            ShowShop();
-            return;
-        }
-        if (actions.IsBusy)
-        {
-            if (feedback != null) feedback.ShowMessage("Aguarde a ação em andamento.");
-            return;
-        }
-        actions.TravelToMerchant(worker, stallDestination.position, ShowShop);
     }
 
     public int GetUnitPrice(SaleItem item)
@@ -120,7 +93,13 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
             if (feedback != null) feedback.ShowMessage("Moedas insuficientes para a compra.");
             return false;
         }
-        if (food > 0) resources.AddFood(food);
+        if (food > 0)
+        {
+            resources.AddFood(food);
+            if (resourceHud != null && shopGroup != null)
+                resourceHud.FlyFromRect(ResourceKind.Food, food,
+                    shopGroup.transform as RectTransform);
+        }
         if (fences > 0)
         {
             resources.TrySpendWood(fences * fenceWoodCost);
@@ -129,8 +108,8 @@ public sealed class SeedMerchant : MonoBehaviour, IPointerClickHandler
         if (houses > 0)
         {
             resources.TrySpendWood(houses * houseWoodCost);
-            hand.AddCard(ActivityKind.BuildHouse);
-            housePurchased = true;
+            for (int i = 0; i < houses; i++) hand.AddCard(ActivityKind.BuildHouse);
+            housesPurchased += houses;
         }
         if (feedback != null) feedback.ShowMessage("Compra concluída: -" + total + " moedas.");
         return true;

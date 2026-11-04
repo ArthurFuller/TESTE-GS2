@@ -1,3 +1,4 @@
+using System;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
@@ -25,6 +26,7 @@ public sealed class EventCardView : MonoBehaviour
     private string pendingDescription;
     private bool flipped;
     public bool IsOpen { get; private set; }
+    public event Action Closed;
 
     private void Awake()
     {
@@ -99,7 +101,11 @@ public sealed class EventCardView : MonoBehaviour
         if (descriptionGroup != null) descriptionGroup.DOKill();
         if (descriptionRect != null) descriptionRect.DOKill();
         if (card != null) card.DOKill();
-        if (backdrop != null) backdrop.DOFade(0, 0.2f).OnComplete(HideImmediate);
+        if (backdrop != null) backdrop.DOFade(0, 0.2f).OnComplete(() =>
+        {
+            HideImmediate();
+            Closed?.Invoke();
+        });
     }
 
     private void HideImmediate()

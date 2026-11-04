@@ -13,7 +13,6 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     [SerializeField] private ResourceBank resources;
     [SerializeField] private SeedMerchant merchant;
     [SerializeField] private ActionResolver actions;
-    [SerializeField] private DayCycle dayCycle;
     [SerializeField] private Camera worldCamera;
     [SerializeField] private DragCursorPreview dragPreview;
     [Header("Disposição da mão")]
@@ -38,10 +37,9 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     private readonly List<ActivityCardDrag> shown = new List<ActivityCardDrag>();
     private readonly List<ActivityCardDrag> testCards = new List<ActivityCardDrag>();
-    private readonly HashSet<ActivityCardDrag> blocked = new HashSet<ActivityCardDrag>();
-    private readonly Dictionary<Graphic, Color> originalColors = new Dictionary<Graphic, Color>();
     private ActivityCardDrag hovered;
     private ActivityCardDrag dragging;
+    private Tween shopPositionTween;
     private bool pointerInside;
     private float firstCenter;
     private float spacing;
@@ -57,6 +55,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private int nextCardId;
     public bool HasRoom => shown.Count < maxHandCards || testCards.Count > 0;
     public int FreeSlots => Mathf.Max(0, maxHandCards - shown.Count + testCards.Count);
+    public bool ContainsCard(ActivityCardDrag card) => shown.Contains(card);
+    public RectTransform DragBoundary => (RectTransform)transform.parent;
 
     private void OnEnable()
     {
@@ -70,7 +70,6 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (resources != null) resources.Changed += Refresh;
         if (merchant != null) merchant.AvailabilityChanged += Refresh;
         if (actions != null) actions.CardUsed += OnCardUsed;
-        if (dayCycle != null) dayCycle.DayChanged += UnblockCards;
         Refresh();
     }
 
@@ -83,7 +82,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (resources != null) resources.Changed -= Refresh;
         if (merchant != null) merchant.AvailabilityChanged -= Refresh;
         if (actions != null) actions.CardUsed -= OnCardUsed;
-        if (dayCycle != null) dayCycle.DayChanged -= UnblockCards;
+        shopPositionTween?.Kill();
         ClearHover(true);
         if (dragging != null) dragging.CancelDrag();
     }
@@ -144,7 +143,14 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
         foreach (ActivityCardDrag card in cards)
             if (card != null && card.Kind == ActivityKind.BuySeeds)
-                SetVisible(card, merchant != null && merchant.IsAvailable);
+            {
+                SetVisible(card, true);
+                RectTransform shopCard = (RectTransform)card.transform;
+                float targetY = merchant != null && merchant.IsAvailable ? 77f : -43f;
+                shopPositionTween?.Kill();
+                shopPositionTween = shopCard.DOAnchorPosY(targetY, 0.2f)
+                    .SetEase(Ease.OutCubic);
+            }
 
         if (shown.Count > maxHandCards)
         {
@@ -177,14 +183,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             DissolveAndRemove(card);
             return;
         }
-        ClearHover(true);
-        blocked.Add(card);
-        foreach (Graphic graphic in card.GetComponentsInChildren<Graphic>(true))
-        {
-            originalColors[graphic] = graphic.color;
-            Color color = graphic.color;
-            graphic.color = new Color(color.r * 0.45f, color.g * 0.45f, color.b * 0.45f, color.a);
-        }
+        // Cartas permanentes continuam disponíveis; o trabalhador controla as ações.
     }
 
     private void DissolveAndRemove(ActivityCardDrag card)
@@ -212,14 +211,6 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             if (card != null) Destroy(card.gameObject);
         });
         Layout(true);
-    }
-
-    private void UnblockCards()
-    {
-        foreach (var entry in originalColors)
-            if (entry.Key != null) entry.Key.color = entry.Value;
-        originalColors.Clear();
-        blocked.Clear();
     }
 
     private int CountCards(ActivityKind kind)
@@ -426,7 +417,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     {
         if (shown.Count == 0) return false;
         for (int i = 0; i < shown.Count; i++)
-            if (ContainsCard(i, screenPoint, eventCamera)) return true;
+            if (!shown[i].IsReturning && ContainsCard(i, screenPoint, eventCamera)) return true;
         return false;
     }
 
@@ -440,6 +431,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         float nearest = float.MaxValue;
         for (int i = 0; i < shown.Count; i++)
         {
+            if (shown[i].IsReturning) continue;
             if (!ContainsCard(i, screenPoint, eventCamera)) continue;
             float distance = Mathf.Abs(x - CardPosition(i).x);
             if (distance >= nearest) continue;
@@ -451,7 +443,6 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     private bool ContainsCard(int index, Vector2 screenPoint, Camera eventCamera)
     {
-        if (blocked.Contains(shown[index])) return false;
         RectTransform rect = shown[index].GetComponent<RectTransform>();
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rect, screenPoint, eventCamera,
                 out Vector2 current)) return false;
