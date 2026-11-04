@@ -253,7 +253,7 @@ public sealed class ActionResolver : MonoBehaviour
             activity == ActivityKind.PlantPumpkin || activity == ActivityKind.PlantJerimum ||
             activity == ActivityKind.Harvest ||
             activity == ActivityKind.WateringCan || activity == ActivityKind.Fertilizer ||
-            activity == ActivityKind.BuildFence || activity == ActivityKind.BuildHouse)
+            activity == ActivityKind.BuildFence)
         {
             SelectPlot(worker, activity, activityName, card);
             return;
@@ -333,10 +333,8 @@ public sealed class ActionResolver : MonoBehaviour
         pendingPlotCard = card;
         pendingPlotAction = activity;
         worker.Select();
-        bool buildingHouse = activity == ActivityKind.BuildHouse;
-        worker.SetStatus(buildingHouse ? "escolha um lote" : "escolha um terreno");
-        feedback.ShowMessage("Clique no " + (buildingHouse ? "lote" : "terreno") + " para " +
-            activityName.ToLowerInvariant() + ".");
+        worker.SetStatus("escolha um terreno");
+        feedback.ShowMessage("Clique no terreno para " + activityName.ToLowerInvariant() + ".");
     }
 
     private void StartGathering(GatheringTask task, WorkerAssignment worker, ActivityKind activity, string activityName,
@@ -440,36 +438,6 @@ public sealed class ActionResolver : MonoBehaviour
         });
     }
 
-    public void TryBuildHouse(HouseSite site)
-    {
-        if (site == null || site.IsBuilt || pendingPlotWorker == null ||
-            pendingPlotAction != ActivityKind.BuildHouse || dayCycle == null ||
-            !dayCycle.CanAcceptActions) return;
-        ActivityCardDrag card = pendingPlotCard;
-        WorkerAssignment builder = TakePendingWorker();
-        CommitAction(builder, ActivityKind.BuildHouse, "construindo casa", card);
-        MoveAndWork(builder, site.ConstructionPosition, plowWorkDuration, () =>
-        {
-            WorkerAssignment resident = site.Build();
-            if (resident != null)
-            {
-                RegisterWorker(resident);
-                dayCycle.RegisterWorker(resident);
-                if (dayEvents != null) dayEvents.RegisterWorker(resident);
-                feedback.ShowMessage("Casa construída. Um novo trabalhador chegou.");
-            }
-            builder.SetStatus("voltando para casa");
-            MoveWorker(builder, builder.HomePosition, () => builder.SetStatus("em casa"));
-        });
-    }
-
-    private void RegisterWorker(WorkerAssignment worker)
-    {
-        if (worker == null || System.Array.IndexOf(workers, worker) >= 0) return;
-        var updated = new System.Collections.Generic.List<WorkerAssignment>(workers) { worker };
-        workers = updated.ToArray();
-    }
-
     private void AcceleratePlot(Plot plot)
     {
         if (plot.IsEmpty || plot.IsReady(dayCycle.CurrentDay, seedCatalog))
@@ -516,14 +484,15 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Plante em um terreno arado e vazio.");
             return;
         }
-        if (seedCatalog == null)
+        if (resources == null || seedCatalog == null || resources.Seeds(crop) == 0)
         {
-            feedback.ShowMessage("Culturas não configuradas.");
+            feedback.ShowMessage("Falta semente de " + (seedCatalog != null ? seedCatalog.Get(crop).displayName : crop.ToString()) + ".");
             return;
         }
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
         CommitAction(worker, pendingPlotAction, "plantando", card);
+        resources.TrySpendSeed(crop);
         MoveAndWork(worker, plot.transform.position, plowWorkDuration, () =>
         {
             plot.Plant(crop, dayCycle.CurrentDay, seedCatalog);

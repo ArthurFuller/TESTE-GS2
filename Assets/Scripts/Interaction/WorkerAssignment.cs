@@ -128,31 +128,6 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     public void ScheduleExtraAction() => nextDayExtraActions++;
 
-    public void ConfigureNewWorker(string name)
-    {
-        if (statusText != null)
-        {
-            statusText = Instantiate(statusText, statusText.transform.parent);
-            statusText.name = "Status - " + name;
-            RectTransform label = statusText.rectTransform;
-            label.anchoredPosition = new Vector2(label.anchoredPosition.x,
-                label.anchoredPosition.y - label.rect.height - 2f);
-            RectTransform background = label.parent as RectTransform;
-            if (background != null)
-                background.sizeDelta = new Vector2(background.sizeDelta.x,
-                    background.sizeDelta.y + label.rect.height + 2f);
-        }
-        workerName = name;
-        HomePosition = transform.position;
-        SetStatus("livre");
-    }
-
-    public void JoinDuringDay()
-    {
-        actionsRemaining = 0;
-        SetStatus("novo morador");
-    }
-
     public void BeginNextDay()
     {
         IsUnavailableToday = absenceDaysRemaining > 0;

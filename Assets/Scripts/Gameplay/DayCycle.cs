@@ -1,6 +1,5 @@
 using System;
 using System.Text;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -36,13 +35,6 @@ public sealed class DayCycle : MonoBehaviour
         (dayEvents == null || !dayEvents.IsPanelOpen);
     public int CurrentDay => currentDay;
     public event Action DayChanged;
-
-    public void RegisterWorker(WorkerAssignment worker)
-    {
-        if (worker == null || Array.IndexOf(workers, worker) >= 0) return;
-        var updated = new List<WorkerAssignment>(workers) { worker };
-        workers = updated.ToArray();
-    }
 
     private void Start()
     {
@@ -112,7 +104,7 @@ public sealed class DayCycle : MonoBehaviour
 
         if (cardChoice != null && currentDay < totalDays)
         {
-            cardChoice.Begin(currentDay, () => ShowDaySummary(fullyFed, partiallyFed, unfed, absent));
+            cardChoice.Begin(() => ShowDaySummary(fullyFed, partiallyFed, unfed, absent));
             return;
         }
         ShowDaySummary(fullyFed, partiallyFed, unfed, absent);

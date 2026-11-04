@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.UI;
-using System.Collections.Generic;
 
 public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre }
 
@@ -28,12 +27,6 @@ public sealed class DayEventController : MonoBehaviour
     public bool IsPanelOpen => card != null && card.IsOpen;
     public int FishingReduction => activeGeneralEvent == SertaoEventKind.Drought ? droughtFishingReduction : 0;
     public int HarvestReduction => activeGeneralEvent == SertaoEventKind.Pests ? pestHarvestReduction : 0;
-
-    public void RegisterWorker(WorkerAssignment worker)
-    {
-        if (worker == null || System.Array.IndexOf(workers, worker) >= 0) return;
-        workers = new List<WorkerAssignment>(workers) { worker }.ToArray();
-    }
 
     public void RecordWood(int amount)
     {
