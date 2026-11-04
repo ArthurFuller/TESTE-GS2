@@ -231,6 +231,18 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Descanso: ação extra amanhã. Alimentação normal hoje.");
             return;
         }
+        if (activity == ActivityKind.FeedAnimals)
+        {
+            if (!dayCycle.TryRepeatAnimalProduction(out int milk, out int eggs))
+            {
+                feedback.ShowMessage("Nenhum animal produziu recursos hoje.");
+                return;
+            }
+            ClearPendingPlot();
+            CommitAction(worker, activity, "distribuindo ração", card);
+            feedback.ShowMessage("Ração: +" + milk + " leite e +" + eggs + " ovos.");
+            return;
+        }
         bool woodActivity = activity == ActivityKind.CollectWood || activity == ActivityKind.WoodPlus;
         bool fishActivity = activity == ActivityKind.Fish || activity == ActivityKind.FishPlus;
         GatheringTask task = woodActivity ? FreeTask(forestTask, forestTaskSecond) :
@@ -253,7 +265,8 @@ public sealed class ActionResolver : MonoBehaviour
             activity == ActivityKind.PlantPumpkin || activity == ActivityKind.PlantJerimum ||
             activity == ActivityKind.Harvest ||
             activity == ActivityKind.WateringCan || activity == ActivityKind.Fertilizer ||
-            activity == ActivityKind.BuildFence || activity == ActivityKind.BuildHouse)
+            activity == ActivityKind.BuildFence || activity == ActivityKind.BuildHouse ||
+            activity == ActivityKind.PlaceCow || activity == ActivityKind.PlaceChicken)
         {
             SelectPlot(worker, activity, activityName, card);
             return;
@@ -285,7 +298,8 @@ public sealed class ActionResolver : MonoBehaviour
         activity == ActivityKind.WoodPlus || activity == ActivityKind.Fish ||
         activity == ActivityKind.FishPlus || activity == ActivityKind.PlantCorn ||
         activity == ActivityKind.PlantPumpkin || activity == ActivityKind.PlantJerimum ||
-        activity == ActivityKind.Coffee;
+        activity == ActivityKind.PlaceCow || activity == ActivityKind.PlaceChicken ||
+        activity == ActivityKind.FeedAnimals || activity == ActivityKind.Coffee;
 
     private void CommitAction(WorkerAssignment worker, ActivityKind activity, string name,
         ActivityCardDrag card)
@@ -320,6 +334,7 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void ClearPendingPlot()
     {
+        Plot.ClearHighlights();
         if (pendingPlotWorker != null && !pendingPlotWorker.UsedToday)
             pendingPlotWorker.SetStatus("livre");
         pendingPlotWorker = null;
@@ -332,6 +347,7 @@ public sealed class ActionResolver : MonoBehaviour
         pendingPlotWorker = worker;
         pendingPlotCard = card;
         pendingPlotAction = activity;
+        Plot.ShowAvailable(activity);
         worker.Select();
         bool buildingHouse = activity == ActivityKind.BuildHouse;
         worker.SetStatus(buildingHouse ? "escolha um lote" : "escolha um terreno");
@@ -419,7 +435,29 @@ public sealed class ActionResolver : MonoBehaviour
             case ActivityKind.WateringCan:
             case ActivityKind.Fertilizer: AcceleratePlot(plot); break;
             case ActivityKind.BuildFence: FencePlot(plot); break;
+            case ActivityKind.PlaceCow: PlaceAnimal(plot, AnimalKind.Cow); break;
+            case ActivityKind.PlaceChicken: PlaceAnimal(plot, AnimalKind.Chicken); break;
         }
+    }
+
+    private void PlaceAnimal(Plot plot, AnimalKind animal)
+    {
+        if (!plot.IsFenced || !plot.IsEmpty || plot.Animal != AnimalKind.None)
+        {
+            feedback.ShowMessage("Escolha um cercado vazio para o animal.");
+            return;
+        }
+        ActivityCardDrag card = pendingPlotCard;
+        WorkerAssignment worker = TakePendingWorker();
+        CommitAction(worker, animal == AnimalKind.Cow ? ActivityKind.PlaceCow :
+            ActivityKind.PlaceChicken, "levando animal ao cercado", card);
+        MoveAndWork(worker, plot.transform.position + Vector3.back, plowWorkDuration, () =>
+        {
+            plot.PlaceAnimal(animal);
+            feedback.ShowMessage(animal == AnimalKind.Cow ? "Vaca no cercado." : "Galinha no cercado.");
+            worker.SetStatus("voltando para casa");
+            MoveWorker(worker, worker.HomePosition, () => worker.SetStatus("em casa"));
+        });
     }
 
     private void FencePlot(Plot plot)
@@ -492,9 +530,9 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void PlowPlot(Plot plot)
     {
-        if (plot.IsPlowed)
+        if (plot.IsPlowed || plot.Animal != AnimalKind.None)
         {
-            feedback.ShowMessage("Esse terreno já está arado.");
+            feedback.ShowMessage("Escolha um terreno livre para arar.");
             return;
         }
         ActivityCardDrag card = pendingPlotCard;
@@ -511,7 +549,7 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void PlantPlot(Plot plot, CropType crop)
     {
-        if (!plot.IsPlowed || !plot.IsEmpty)
+        if (!plot.IsPlowed || !plot.IsEmpty || plot.Animal != AnimalKind.None)
         {
             feedback.ShowMessage("Plante em um terreno arado e vazio.");
             return;
@@ -621,6 +659,7 @@ public sealed class ActionResolver : MonoBehaviour
         WorkerAssignment worker = pendingPlotWorker;
         pendingPlotWorker = null;
         pendingPlotCard = null;
+        Plot.ClearHighlights();
         pendingFoodCard = null;
         pendingFoodWorker = null;
         return worker;
@@ -629,6 +668,7 @@ public sealed class ActionResolver : MonoBehaviour
     public void ReturnWorkersHome()
     {
         pendingPlotWorker = null;
+        Plot.ClearHighlights();
         foreach (WorkerAssignment worker in workers)
         {
             if (worker == null || DOTween.IsTweening(worker.transform) ||
@@ -645,6 +685,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         pendingPlotWorker = null;
         pendingPlotCard = null;
+        Plot.ClearHighlights();
         pendingFoodWorker = null;
         pendingFoodCard = null;
         WoodGainedToday = 0;
@@ -671,6 +712,11 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void MoveAndWork(WorkerAssignment worker, Vector3 destination, float workDuration, System.Action onFinished)
     {
+        if (Vector3.Distance(worker.transform.position, destination) <= 0.15f)
+        {
+            WorkAtStation(worker, workDuration, onFinished);
+            return;
+        }
         worker.SetStatus("caminhando");
         MoveWorker(worker, destination, () => WorkAtStation(worker, workDuration, onFinished));
     }

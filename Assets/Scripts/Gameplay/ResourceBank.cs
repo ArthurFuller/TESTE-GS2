@@ -12,6 +12,8 @@ public sealed class ResourceBank : MonoBehaviour
     [SerializeField, Min(0), InspectorName("Milho colhido")] private int startingCorn;
     [SerializeField, Min(0), InspectorName("Macaxeira colhida")] private int startingPumpkin;
     [SerializeField, Min(0), InspectorName("Jerimum colhido")] private int startingJerimum;
+    [SerializeField, Min(0), InspectorName("Leite")] private int startingMilk;
+    [SerializeField, Min(0), InspectorName("Ovos")] private int startingEggs;
     [SerializeField, Min(0), InspectorName("Sementes de milho")] private int startingCornSeeds;
     [SerializeField, Min(0), InspectorName("Sementes de macaxeira")] private int startingPumpkinSeeds;
     [SerializeField, Min(0), InspectorName("Sementes de jerimum")] private int startingJerimumSeeds;
@@ -35,6 +37,8 @@ public sealed class ResourceBank : MonoBehaviour
     public int Corn { get; private set; }
     public int Pumpkin { get; private set; }
     public int Jerimum { get; private set; }
+    public int Milk { get; private set; }
+    public int Eggs { get; private set; }
     public event Action Changed;
 
     private void Awake()
@@ -52,6 +56,8 @@ public sealed class ResourceBank : MonoBehaviour
         Corn = startingCorn;
         Pumpkin = startingPumpkin;
         Jerimum = startingJerimum;
+        Milk = startingMilk;
+        Eggs = startingEggs;
     }
 
     public void AddWood(int amount)
@@ -85,6 +91,21 @@ public sealed class ResourceBank : MonoBehaviour
     }
 
     public void AddFish(int amount) { Fish += Mathf.Max(0, amount); Changed?.Invoke(); }
+    public void AddAnimalProducts(int milk, int eggs)
+    {
+        Milk += Mathf.Max(0, milk);
+        Eggs += Mathf.Max(0, eggs);
+        Changed?.Invoke();
+    }
+
+    public bool TryDeliverAnimalProduct(SaleItem item)
+    {
+        if (item == SaleItem.Milk && Milk > 0) Milk--;
+        else if (item == SaleItem.Eggs && Eggs > 0) Eggs--;
+        else return false;
+        Changed?.Invoke();
+        return true;
+    }
     public void AddCrop(CropType crop, int amount)
     {
         if (crop == CropType.Corn) Corn += Mathf.Max(0, amount);

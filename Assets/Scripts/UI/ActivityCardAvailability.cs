@@ -139,7 +139,6 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             foreach (ActivityCardDrag card in cards)
                 if (card != null && card.Kind == ActivityKind.PrepareFood)
                     SetVisible(card, false);
-            AddCard(ActivityKind.PlantCorn, false);
             changed = true;
         }
 

@@ -10,6 +10,8 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField] private RectTransform greenTarget;
     [SerializeField] private Text title;
     [SerializeField, Min(0.1f)] private float markerCrossingDuration = 2f;
+    [SerializeField, Range(0.5f, 1f)] private float speedMultiplierPerHit = 0.82f;
+    [SerializeField, Min(0.2f)] private float minimumCrossingDuration = 0.55f;
     [SerializeField, Min(0f)] private float edgePadding = 8f;
     [SerializeField, Min(2)] private int rounds = 3;
     [SerializeField, Min(0f)] private float targetWidthReduction = 10f;
@@ -75,11 +77,12 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     public void Stop()
     {
-        if (completed == null || Time.unscaledTime - roundStartedAt < 0.15f) return;
+        if (completed == null || Time.unscaledTime - roundStartedAt < 0.07f) return;
 
         Bounds markerBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, marker);
         Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, greenTarget);
-        bool hit = markerBounds.min.x >= targetBounds.min.x && markerBounds.max.x <= targetBounds.max.x;
+        bool hit = markerBounds.center.x >= targetBounds.min.x &&
+            markerBounds.center.x <= targetBounds.max.x;
         if (hit)
         {
             hits++;
@@ -132,8 +135,10 @@ public sealed class GatheringMinigame : MonoBehaviour
         float pivotOffset = (marker.pivot.x - 0.5f) * markerWidth;
         marker.DOKill();
         marker.anchoredPosition = new Vector2(-travel * 0.5f + pivotOffset, marker.anchoredPosition.y);
-        marker.DOAnchorPosX(travel * 0.5f + pivotOffset, markerCrossingDuration)
-            .SetEase(Ease.InOutCubic).SetLoops(-1, LoopType.Yoyo);
+        float crossingDuration = Mathf.Max(minimumCrossingDuration,
+            markerCrossingDuration * Mathf.Pow(speedMultiplierPerHit, hits) / difficultyMultiplier);
+        marker.DOAnchorPosX(travel * 0.5f + pivotOffset, crossingDuration)
+            .SetEase(Ease.Linear).SetLoops(-1, LoopType.Yoyo);
 
         roundStartedAt = Time.unscaledTime;
         if (title != null)

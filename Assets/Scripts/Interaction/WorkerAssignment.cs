@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -29,10 +31,26 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private int nextDayExtraActions;
     private int coffeeActions;
     private ActivityKind? coffeeExcludedActivity;
+    private readonly List<Transform> actionDots = new List<Transform>();
+    private Transform actionDotsRoot;
 
     private void Awake()
     {
         HomePosition = transform.position;
+        actionDotsRoot = new GameObject("Ações - " + workerName).transform;
+        actionDotsRoot.SetParent(transform.parent, false);
+        RefreshActionDots(false);
+    }
+
+    private void LateUpdate()
+    {
+        if (actionDotsRoot != null)
+            actionDotsRoot.position = transform.position + Vector3.up * 1.65f;
+    }
+
+    private void OnDestroy()
+    {
+        if (actionDotsRoot != null) Destroy(actionDotsRoot.gameObject);
     }
 
     private void OnEnable()
@@ -92,6 +110,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     {
         bool spendingCoffeeAction = coffeeActions > 0 && actionsRemaining <= coffeeActions;
         actionsRemaining = Mathf.Max(0, actionsRemaining - 1);
+        RefreshActionDots(true);
         if (spendingCoffeeAction)
         {
             coffeeActions--;
@@ -114,6 +133,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     public void GrantCoffeeAction()
     {
         actionsRemaining++;
+        RefreshActionDots(true);
         coffeeActions++;
         coffeeExcludedActivity = LastActivity;
     }
@@ -122,6 +142,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     {
         // Replay cancels the pending coffee restriction and leaves two actions.
         actionsRemaining = 2;
+        RefreshActionDots(true);
         coffeeActions = 0;
         coffeeExcludedActivity = null;
     }
@@ -143,6 +164,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
                     background.sizeDelta.y + label.rect.height + 2f);
         }
         workerName = name;
+        if (actionDotsRoot != null) actionDotsRoot.name = "Ações - " + name;
         HomePosition = transform.position;
         SetStatus("livre");
     }
@@ -150,6 +172,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     public void JoinDuringDay()
     {
         actionsRemaining = 0;
+        RefreshActionDots(false);
         SetStatus("novo morador");
     }
 
@@ -158,6 +181,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         IsUnavailableToday = absenceDaysRemaining > 0;
         if (IsUnavailableToday) absenceDaysRemaining--;
         actionsRemaining = IsUnavailableToday ? 0 : 1 + nextDayExtraActions;
+        RefreshActionDots(true);
         nextDayExtraActions = 0;
         coffeeActions = 0;
         coffeeExcludedActivity = null;
@@ -184,5 +208,37 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     {
         nextDayProductionReduction = Mathf.Max(0, productionReduction);
         nextDayMovementDurationMultiplier = Mathf.Max(1f, movementDurationMultiplier);
+    }
+
+    private void RefreshActionDots(bool animate)
+    {
+        if (actionDotsRoot == null) return;
+        while (actionDots.Count > actionsRemaining)
+        {
+            Transform dot = actionDots[actionDots.Count - 1];
+            actionDots.RemoveAt(actionDots.Count - 1);
+            dot.DOKill();
+            if (animate)
+                DOTween.Sequence().Append(dot.DOPunchScale(Vector3.one * 0.08f, 0.13f))
+                    .Append(dot.DOScale(Vector3.zero, 0.13f))
+                    .OnComplete(() => { if (dot != null) Destroy(dot.gameObject); });
+            else Destroy(dot.gameObject);
+        }
+        while (actionDots.Count < actionsRemaining)
+        {
+            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.name = "Ação " + (actionDots.Count + 1);
+            sphere.transform.SetParent(actionDotsRoot, false);
+            Collider hitbox = sphere.GetComponent<Collider>();
+            if (hitbox != null) Destroy(hitbox);
+            Transform dot = sphere.transform;
+            actionDots.Add(dot);
+            dot.localScale = animate ? Vector3.zero : Vector3.one * 0.13f;
+            if (animate)
+                DOTween.Sequence().Append(dot.DOScale(0.13f, 0.17f).SetEase(Ease.OutBack))
+                    .Append(dot.DOPunchScale(Vector3.one * 0.06f, 0.2f));
+        }
+        for (int i = 0; i < actionDots.Count; i++)
+            actionDots[i].localPosition = new Vector3((i - (actionDots.Count - 1) * 0.5f) * 0.2f, 0f, 0f);
     }
 }

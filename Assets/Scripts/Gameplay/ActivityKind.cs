@@ -19,5 +19,8 @@ public enum ActivityKind
     Fertilizer,
     BuildHouse,
     BuildFence,
-    PlantJerimum
+    PlantJerimum,
+    PlaceCow,
+    PlaceChicken,
+    FeedAnimals
 }

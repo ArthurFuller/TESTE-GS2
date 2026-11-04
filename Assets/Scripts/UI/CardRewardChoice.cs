@@ -12,6 +12,7 @@ public sealed class CardRewardChoice : MonoBehaviour
     [SerializeField] private Button[] choiceButtons;
     [SerializeField] private Image[] choiceArt;
     [SerializeField] private Text[] choiceNames;
+    [SerializeField] private Sprite placeholderArt;
     [SerializeField] private RectTransform[] choiceCards;
     [SerializeField] private Button[] rerollButtons;
     [SerializeField, Min(0f)] private float floatDistance = 6f;
@@ -171,11 +172,25 @@ public sealed class CardRewardChoice : MonoBehaviour
 
     private void ShowChoice(int index)
     {
-        SetChoiceName(index);
         if (choiceArt[index] == null) return;
         Image source = offered[index].GetComponent<Image>();
-        choiceArt[index].sprite = source != null ? source.sprite : null;
+        Sprite sprite = source != null ? source.sprite : null;
+        bool placeholder = sprite == null || sprite == placeholderArt;
+        choiceArt[index].sprite = sprite != null ? sprite : placeholderArt;
         choiceArt[index].color = Color.white;
+        Text label = choiceNames[index];
+        if (label == null) return;
+        label.gameObject.SetActive(placeholder);
+        if (!placeholder) return;
+        defaultNames[index].Apply(label);
+        label.text = offered[index].DisplayName;
+        label.rectTransform.anchoredPosition = Vector2.zero;
+        label.rectTransform.sizeDelta = new Vector2(128f, 100f);
+        label.fontSize = 17;
+        label.color = new Color(0.72f, 0.1f, 0.09f);
+        label.resizeTextForBestFit = true;
+        label.resizeTextMinSize = 12;
+        label.resizeTextMaxSize = 17;
     }
 
     private void Reroll(int index)
@@ -210,22 +225,6 @@ public sealed class CardRewardChoice : MonoBehaviour
                 }
             button.interactable = !rerolled[i] && hasAlternative;
         }
-    }
-
-    private void SetChoiceName(int index)
-    {
-        if (choiceNames[index] == null) return;
-        Text label = choiceNames[index];
-        Text cardTitle = null;
-        foreach (Text text in offered[index].GetComponentsInChildren<Text>(true))
-            if (text.gameObject.activeSelf)
-            {
-                cardTitle = text;
-                break;
-            }
-
-        (cardTitle != null ? new NameStyle(cardTitle) : defaultNames[index]).Apply(label);
-        label.text = cardTitle != null ? cardTitle.text : offered[index].DisplayName;
     }
 
     private void Choose(int index)

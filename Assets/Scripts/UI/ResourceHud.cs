@@ -11,6 +11,7 @@ public sealed class ResourceHud : MonoBehaviour
     [SerializeField] private Text cornText;
     [SerializeField] private Text foodText;
     [SerializeField] private Text coinText;
+    [SerializeField] private Text animalText;
 
     private void OnEnable()
     {
@@ -41,5 +42,7 @@ public sealed class ResourceHud : MonoBehaviour
         if (cornText != null) cornText.text = resources.Corn.ToString();
         if (foodText != null) foodText.text = "Comida: " + resources.Food;
         if (coinText != null) coinText.text = "Dinheiro: " + resources.Coins;
+        if (animalText != null) animalText.text = "Leite: " + resources.Milk +
+            "     Ovos: " + resources.Eggs;
     }
 }
