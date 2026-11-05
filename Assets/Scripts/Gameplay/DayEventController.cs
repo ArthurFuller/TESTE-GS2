@@ -2,13 +2,18 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 
-public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre }
+public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre, Calm }
 
 public sealed class DayEventController : MonoBehaviour
 {
     [SerializeField] private EventCardView card;
     [SerializeField] private Plot[] plots;
     [SerializeField] private WorkerAssignment[] workers;
+    [Header("Artes dos eventos")]
+    [SerializeField] private Sprite droughtArt;
+    [SerializeField] private Sprite rainArt;
+    [SerializeField] private Sprite comadreArt;
+    [SerializeField] private Sprite calmArt;
     [Header("Parâmetros provisórios de eventos")]
     [SerializeField, Range(0f, 1f)] private float generalEventChance = 0.35f;
     [SerializeField, Min(1)] private int eventDurationDays = 2;
@@ -90,15 +95,27 @@ public sealed class DayEventController : MonoBehaviour
             foreach (var plot in plots) if (plot != null) plot.AdvanceGrowth(rainGrowthBonus);
             forestExploitation = Mathf.Max(0, forestExploitation - rainForestRecovery);
         }
+        if (announced == SertaoEventKind.None && activeGeneralEvent == SertaoEventKind.None)
+            announced = SertaoEventKind.Calm;
         if (announced != SertaoEventKind.None && card != null)
-            card.Show(Title(announced), Description(announced));
+            card.Show(Title(announced), Description(announced), Art(announced));
     }
+
+    private Sprite Art(SertaoEventKind kind) => kind switch
+    {
+        SertaoEventKind.Drought => droughtArt,
+        SertaoEventKind.Rain => rainArt,
+        SertaoEventKind.Comadre => comadreArt,
+        SertaoEventKind.Calm => calmArt,
+        _ => null
+    };
 
     private string Title(SertaoEventKind kind) => kind switch
     {
         SertaoEventKind.Drought => "SECA",
         SertaoEventKind.Pests => "PRAGAS",
         SertaoEventKind.Rain => "CHUVA",
+        SertaoEventKind.Calm => "DIA TRANQUILO",
         _ => "COMADRE FULOZINHA"
     };
 
@@ -106,7 +123,8 @@ public sealed class DayEventController : MonoBehaviour
     {
         SertaoEventKind.Drought => "A seca reduz a pesca e atrasa o crescimento. Duração: " + eventDurationDays + " dia(s).",
         SertaoEventKind.Pests => "As pragas reduzem a colheita. Duração: " + eventDurationDays + " dia(s).",
-        SertaoEventKind.Rain => "A chuva acelera o crescimento e recupera a floresta. Duração: " + eventDurationDays + " dia(s).",
+        SertaoEventKind.Rain => "A chuva acelera o crescimento e reduz o impacto da coleta de madeira. Duração: " + eventDurationDays + " dia(s).",
+        SertaoEventKind.Calm => "O dia começou tranquilo. Nenhum evento especial altera a rotina hoje.",
         _ => "A exploração da floresta desorientou um trabalhador por " + comadreAbsenceDays + " dia(s)."
     };
 }

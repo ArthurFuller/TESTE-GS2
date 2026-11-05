@@ -57,7 +57,7 @@ public sealed class SeedMerchant : MonoBehaviour
     public void SetDay(int day, bool hasDeliveryDue = false)
     {
         bool scheduled = Array.IndexOf(marketDays, day) >= 0;
-        IsAvailable = hasDeliveryDue || scheduled;
+        IsAvailable = hasDeliveryDue || scheduled || day == 12;
         if (stallVisual != null) stallVisual.SetActive(IsAvailable);
         if (closedStallLock != null) closedStallLock.SetActive(!IsAvailable);
         HideShop();

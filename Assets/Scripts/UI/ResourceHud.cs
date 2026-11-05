@@ -15,6 +15,7 @@ public sealed class ResourceHud : MonoBehaviour
     [SerializeField] private Text foodText;
     [SerializeField] private Text coinText;
     [SerializeField] private Text animalText;
+    [SerializeField] private Text eggText;
     [Header("Ícones em voo")]
     [SerializeField] private Sprite woodSprite;
     [SerializeField] private Sprite fishSprite;
@@ -32,6 +33,11 @@ public sealed class ResourceHud : MonoBehaviour
     private RectTransform canvasRect;
     private Texture2D circleTexture;
     private Sprite circleSprite;
+    private int observedCoins;
+    private int coinLossRemaining;
+    private Tween coinLossTween;
+    private Tween coinFlashTween;
+    private Color normalCoinColor;
 
     private Camera UiCamera => canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
         ? canvas.worldCamera : null;
@@ -45,6 +51,8 @@ public sealed class ResourceHud : MonoBehaviour
 
     private void OnEnable()
     {
+        observedCoins = resources != null ? resources.Coins : 0;
+        if (coinText != null) normalCoinColor = coinText.color;
         if (resources != null) resources.Changed += Refresh;
         Refresh();
     }
@@ -53,6 +61,10 @@ public sealed class ResourceHud : MonoBehaviour
     {
         if (resources != null) resources.Changed -= Refresh;
         DOTween.Kill(this);
+        coinLossTween?.Kill();
+        coinFlashTween?.Kill();
+        if (coinText != null) coinText.color = normalCoinColor;
+        coinLossRemaining = 0;
         System.Array.Clear(inFlight, 0, inFlight.Length);
     }
 
@@ -62,12 +74,13 @@ public sealed class ResourceHud : MonoBehaviour
         if (circleTexture != null) Destroy(circleTexture);
     }
 
-    public void FlyFromWorld(ResourceKind kind, int amount, Vector3 origin)
+    public void FlyFromWorld(ResourceKind kind, int amount, Vector3 origin,
+        float pauseSeconds = 0f, System.Action onAllArrived = null)
     {
         Camera worldCamera = Camera.main;
         Vector2 screen = worldCamera != null ? (Vector2)worldCamera.WorldToScreenPoint(origin) :
             new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-        FlyFromScreen(kind, amount, screen);
+        FlyFromScreen(kind, amount, screen, pauseSeconds, onAllArrived);
     }
 
     public void FlyFromRect(ResourceKind kind, int amount, RectTransform origin)
@@ -77,24 +90,34 @@ public sealed class ResourceHud : MonoBehaviour
                 origin.TransformPoint(origin.rect.center)));
     }
 
-    public void FlyFromScreen(ResourceKind kind, int amount, Vector2 screenOrigin)
+    public void FlyFromScreen(ResourceKind kind, int amount, Vector2 screenOrigin,
+        float pauseSeconds = 0f, System.Action onAllArrived = null)
     {
-        if (amount <= 0 || canvasRect == null || !isActiveAndEnabled) return;
+        if (amount <= 0 || canvasRect == null || !isActiveAndEnabled)
+        {
+            onAllArrived?.Invoke();
+            return;
+        }
         Text target = TargetFor(kind);
-        if (target == null) return;
+        if (target == null)
+        {
+            onAllArrived?.Invoke();
+            return;
+        }
         inFlight[(int)kind] += amount;
         Refresh();
         Vector2 origin = CanvasPoint(screenOrigin);
         Vector3 targetCenter = target.rectTransform.rect.center;
-        if (kind == ResourceKind.Milk || kind == ResourceKind.Eggs)
-            targetCenter.x += target.rectTransform.rect.width *
-                (kind == ResourceKind.Milk ? -0.25f : 0.25f);
         Vector2 destination = CanvasPoint(RectTransformUtility.WorldToScreenPoint(UiCamera,
             target.rectTransform.TransformPoint(targetCenter)));
         int count = Mathf.Min(amount, Mathf.Max(1, maximumFlyingIcons));
+        int pending = count;
         for (int i = 0; i < count; i++)
             CreateIcon(kind, i, count, origin, destination, target,
-                amount / count + (i < amount % count ? 1 : 0));
+                amount / count + (i < amount % count ? 1 : 0), pauseSeconds, () =>
+                {
+                    if (--pending == 0) onAllArrived?.Invoke();
+                });
     }
 
     private Vector2 CanvasPoint(Vector2 screen)
@@ -105,7 +128,8 @@ public sealed class ResourceHud : MonoBehaviour
     }
 
     private void CreateIcon(ResourceKind kind, int index, int count, Vector2 origin,
-        Vector2 destination, Text target, int credited)
+        Vector2 destination, Text target, int credited, float pauseSeconds,
+        System.Action onArrived)
     {
         var icon = new GameObject("Recurso em voo - " + kind, typeof(RectTransform),
             typeof(CanvasRenderer), typeof(Image));
@@ -131,6 +155,7 @@ public sealed class ResourceHud : MonoBehaviour
         else
             flight.AppendInterval(index * iconInterval)
                 .Append(rect.DOScale(1f, 0.15f).SetEase(Ease.OutBack));
+        if (pauseSeconds > 0f) flight.AppendInterval(pauseSeconds);
         flight.Append(rect.DOAnchorPos(destination, flightDuration).SetEase(Ease.InCubic))
             .Join(rect.DOScale(0.45f, flightDuration).SetEase(Ease.InQuad))
             .OnComplete(() =>
@@ -140,6 +165,7 @@ public sealed class ResourceHud : MonoBehaviour
                 target.rectTransform.DOKill();
                 target.rectTransform.localScale = Vector3.one;
                 target.rectTransform.DOPunchScale(Vector3.one * 0.12f, 0.2f, 2);
+                onArrived?.Invoke();
             })
             .OnKill(() => { if (icon != null) Destroy(icon); });
     }
@@ -180,26 +206,61 @@ public sealed class ResourceHud : MonoBehaviour
         ResourceKind.Wood => woodText,
         ResourceKind.Fish => fishText,
         ResourceKind.Corn => cornText,
-        ResourceKind.Pumpkin => pumpkinText,
-        ResourceKind.Jerimum => cassavaText,
+        ResourceKind.Pumpkin => cassavaText,
+        ResourceKind.Jerimum => pumpkinText,
         ResourceKind.Food => foodText,
         ResourceKind.Coins => coinText,
+        ResourceKind.Eggs => eggText != null ? eggText : animalText,
         _ => animalText
     };
 
     private int Shown(ResourceKind kind, int stored) => Mathf.Max(0, stored - inFlight[(int)kind]);
 
+    private void StepCoinLoss()
+    {
+        if (coinLossRemaining <= 0)
+        {
+            coinFlashTween?.Kill();
+            if (coinText != null) coinText.color = normalCoinColor;
+            return;
+        }
+        coinLossRemaining--;
+        Refresh();
+        if (coinText != null)
+        {
+            coinText.rectTransform.DOKill();
+            coinText.rectTransform.localScale = Vector3.one;
+            coinText.rectTransform.DOPunchScale(Vector3.one * 0.06f, 0.13f, 2);
+        }
+        coinLossTween = DOVirtual.DelayedCall(0.075f, StepCoinLoss).SetTarget(this);
+    }
+
     private void Refresh()
     {
         if (resources == null) return;
+        if (resources.Coins < observedCoins && coinText != null)
+        {
+            coinLossRemaining += observedCoins - resources.Coins;
+            if (coinLossTween == null || !coinLossTween.IsActive())
+            {
+                coinFlashTween?.Kill();
+                coinText.color = normalCoinColor;
+                coinFlashTween = coinText.DOColor(new Color(0.95f, 0.14f, 0.14f), 0.09f)
+                    .SetLoops(-1, LoopType.Yoyo);
+                coinLossTween = DOVirtual.DelayedCall(0.075f, StepCoinLoss).SetTarget(this);
+            }
+        }
+        observedCoins = resources.Coins;
         if (woodText != null) woodText.text = Shown(ResourceKind.Wood, resources.Wood).ToString();
         if (fishText != null) fishText.text = Shown(ResourceKind.Fish, resources.Fish).ToString();
-        if (cassavaText != null) cassavaText.text = Shown(ResourceKind.Jerimum, resources.Jerimum).ToString();
-        if (pumpkinText != null) pumpkinText.text = Shown(ResourceKind.Pumpkin, resources.Pumpkin).ToString();
+        if (cassavaText != null) cassavaText.text = Shown(ResourceKind.Pumpkin, resources.Pumpkin).ToString();
+        if (pumpkinText != null) pumpkinText.text = Shown(ResourceKind.Jerimum, resources.Jerimum).ToString();
         if (cornText != null) cornText.text = Shown(ResourceKind.Corn, resources.Corn).ToString();
         if (foodText != null) foodText.text = "Comida: " + Shown(ResourceKind.Food, resources.Food);
-        if (coinText != null) coinText.text = "Dinheiro: " + Shown(ResourceKind.Coins, resources.Coins);
+        if (coinText != null) coinText.text = "Dinheiro: " +
+            Mathf.Max(0, Shown(ResourceKind.Coins, resources.Coins) + coinLossRemaining);
         if (animalText != null) animalText.text = "Leite: " + Shown(ResourceKind.Milk, resources.Milk) +
-            "     Ovos: " + Shown(ResourceKind.Eggs, resources.Eggs);
+            (eggText == null ? "     Ovos: " + Shown(ResourceKind.Eggs, resources.Eggs) : "");
+        if (eggText != null) eggText.text = Shown(ResourceKind.Eggs, resources.Eggs).ToString();
     }
 }

@@ -13,7 +13,6 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
     private RectTransform draggedUnit;
     private Canvas canvas;
     private Image image;
-    private Sprite originalSprite;
     private bool reserved;
 
     public SaleItem Kind { get; private set; }
@@ -22,7 +21,6 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
     {
         rect = (RectTransform)transform;
         image = GetComponent<Image>();
-        if (image != null) originalSprite = image.sprite;
     }
 
     public void Configure(FeedingMinigame feedingGame, SaleItem kind, Sprite sprite, Font font)
@@ -31,14 +29,9 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
         Kind = kind;
         if (image != null)
         {
-            image.sprite = sprite != null ? sprite : originalSprite;
-            image.color = kind == SaleItem.Food ? Color.white :
-                kind == SaleItem.Fish ? new Color(0.68f, 0.86f, 1f) :
-                kind == SaleItem.Corn ? new Color(1f, 0.89f, 0.55f) :
-                kind == SaleItem.Pumpkin ? new Color(0.9f, 0.75f, 0.56f) :
-                kind == SaleItem.Milk ? new Color(0.85f, 0.95f, 1f) :
-                kind == SaleItem.Eggs ? new Color(1f, 0.91f, 0.72f) :
-                new Color(1f, 0.7f, 0.43f);
+            image.sprite = sprite;
+            image.color = sprite != null ? Color.white : new Color(0.85f, 0.95f, 1f);
+            image.preserveAspect = true;
         }
         if (nameLabel != null)
         {

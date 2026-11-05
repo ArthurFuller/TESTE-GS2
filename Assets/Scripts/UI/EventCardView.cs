@@ -10,6 +10,8 @@ public sealed class EventCardView : MonoBehaviour
     [SerializeField] private Text titleText;
     [SerializeField] private LetterJumpText descriptionText;
     [SerializeField] private CanvasGroup descriptionGroup;
+    [SerializeField] private Button revealButton;
+    [SerializeField] private Button skipButton;
     [Header("Animação configurável")]
     [SerializeField, Min(0)] private float entranceDuration = 0.6f;
     [SerializeField, Min(0)] private float flipDuration = 0.35f;
@@ -17,47 +19,105 @@ public sealed class EventCardView : MonoBehaviour
     [SerializeField] private float entranceOffset = -650f;
     [SerializeField] private float swingDegrees = 7f;
     [SerializeField, Min(0)] private float descriptionSlideOffset = 35f;
-    [SerializeField] private Color backColor = new Color(0.72f, 0.60f, 0.43f, 0.95f);
+    [SerializeField, Min(0)] private float revealedGap = 0f;
+    [SerializeField] private Vector2 illustratedCardSize = new Vector2(360f, 360f);
     private Vector2 homePosition;
     private Vector2 descriptionHomePosition;
+    private Vector2 revealedCardPosition;
+    private Vector2 originalCardSize;
     private RectTransform descriptionRect;
     private Image cardImage;
     private Color frontColor;
+    private Sprite originalSprite;
+    private bool originalPreserveAspect;
     private string pendingDescription;
     private bool flipped;
+    private Sequence revealMotion;
     public bool IsOpen { get; private set; }
     public event Action Closed;
 
     private void Awake()
     {
-        if (card != null) homePosition = card.anchoredPosition;
-        if (card != null) cardImage = card.GetComponent<Image>();
-        if (cardImage != null) frontColor = cardImage.color;
-        if (descriptionGroup != null)
+        if (card != null)
         {
-            descriptionRect = descriptionGroup.GetComponent<RectTransform>();
-            if (descriptionRect != null) descriptionHomePosition = descriptionRect.anchoredPosition;
+            originalCardSize = card.sizeDelta;
+            cardImage = card.GetComponent<Image>();
+            if (revealButton == null) revealButton = card.GetComponentInChildren<Button>(true);
         }
+        if (cardImage != null)
+        {
+            frontColor = cardImage.color;
+            originalSprite = cardImage.sprite;
+            originalPreserveAspect = cardImage.preserveAspect;
+        }
+        if (descriptionGroup != null)
+            descriptionRect = descriptionGroup.GetComponent<RectTransform>();
+        UpdatePositions();
         HideImmediate();
     }
 
-    public void Show(string title, string description)
+    private static Vector2 CenteredPosition(RectTransform rect) => new Vector2(
+        (rect.pivot.x - 0.5f) * rect.rect.width,
+        (rect.pivot.y - 0.5f) * rect.rect.height);
+
+    private void UpdatePositions()
+    {
+        if (card == null) return;
+        homePosition = CenteredPosition(card);
+        if (revealButton != null)
+        {
+            RectTransform button = (RectTransform)revealButton.transform;
+            button.anchoredPosition = new Vector2(
+                (card.rect.width - button.rect.width) * 0.5f,
+                -card.rect.height - 12f);
+        }
+        if (descriptionRect == null) return;
+        float left = -(card.rect.width + revealedGap + descriptionRect.rect.width) * 0.5f;
+        revealedCardPosition = new Vector2(left + card.pivot.x * card.rect.width,
+            homePosition.y);
+        descriptionHomePosition = new Vector2(
+            left + card.rect.width + revealedGap +
+                descriptionRect.pivot.x * descriptionRect.rect.width,
+            (descriptionRect.pivot.y - 0.5f) * descriptionRect.rect.height);
+    }
+
+    public void Show(string title, string description, Sprite art = null)
     {
         if (card == null || backdrop == null) return;
         IsOpen = true;
         pendingDescription = description;
         flipped = false;
+        revealMotion?.Kill();
         card.DOKill();
         backdrop.DOKill();
         if (descriptionGroup != null) descriptionGroup.DOKill();
         if (descriptionRect != null) descriptionRect.DOKill();
-        if (cardImage != null) cardImage.color = frontColor;
-        if (titleText != null) titleText.text = title;
+        card.sizeDelta = art != null ? illustratedCardSize : originalCardSize;
+        UpdatePositions();
+        if (cardImage != null)
+        {
+            cardImage.sprite = art != null ? art : originalSprite;
+            cardImage.color = art != null ? Color.white : frontColor;
+            cardImage.preserveAspect = art != null || originalPreserveAspect;
+        }
+        if (titleText != null)
+        {
+            titleText.text = title;
+            titleText.transform.localRotation = Quaternion.identity;
+            titleText.gameObject.SetActive(art == null);
+        }
+        if (revealButton != null)
+        {
+            revealButton.gameObject.SetActive(true);
+            revealButton.interactable = true;
+        }
+        if (skipButton != null) skipButton.gameObject.SetActive(true);
         if (descriptionText != null) descriptionText.text = string.Empty;
         if (descriptionGroup != null)
         {
             descriptionGroup.alpha = 0;
             descriptionGroup.blocksRaycasts = false;
+            descriptionGroup.interactable = false;
         }
         if (descriptionRect != null)
             descriptionRect.anchoredPosition = descriptionHomePosition + Vector2.left * descriptionSlideOffset;
@@ -65,8 +125,10 @@ public sealed class EventCardView : MonoBehaviour
         backdrop.alpha = 0;
         backdrop.blocksRaycasts = true;
         card.anchoredPosition = homePosition + Vector2.up * entranceOffset;
+        card.localScale = Vector3.one;
         card.localRotation = Quaternion.identity;
-        backdrop.DOFade(0.65f, entranceDuration);
+        // O CanvasGroup também afeta os filhos: o card precisa chegar a alpha 1.
+        backdrop.DOFade(1f, entranceDuration);
         card.DOAnchorPos(homePosition, entranceDuration).SetEase(Ease.OutCubic)
             .OnComplete(() => card.DORotate(new Vector3(0, 0, swingDegrees), 0.12f)
                 .SetLoops(2, LoopType.Yoyo).OnComplete(() => card.localRotation = Quaternion.identity));
@@ -77,19 +139,27 @@ public sealed class EventCardView : MonoBehaviour
         if (!IsOpen || flipped || card == null || descriptionGroup == null) return;
         flipped = true;
         card.DOKill();
-        card.DOScaleX(0, flipDuration * 0.5f).OnComplete(() =>
+        if (revealButton != null)
         {
-            if (cardImage != null) cardImage.color = backColor;
-            if (titleText != null) titleText.text = "DETALHES";
+            revealButton.interactable = false;
+            revealButton.gameObject.SetActive(false);
+        }
+        if (skipButton != null) skipButton.gameObject.SetActive(false);
+        float duration = Mathf.Max(0.15f, flipDuration);
+        revealMotion = DOTween.Sequence().SetTarget(this);
+        revealMotion.Append(card.DOAnchorPos(revealedCardPosition, duration)
+            .SetEase(Ease.InOutCubic));
+        if (descriptionRect != null)
+            revealMotion.Insert(0f,
+                descriptionRect.DOAnchorPos(descriptionHomePosition, duration)
+                    .SetEase(Ease.OutCubic));
+        revealMotion.Insert(0f, descriptionGroup.DOFade(1f, duration));
+        revealMotion.InsertCallback(duration * 0.4f, () =>
+        {
             if (descriptionText != null)
-            {
                 descriptionText.Reveal(pendingDescription, textDuration);
-            }
             descriptionGroup.blocksRaycasts = true;
-            descriptionGroup.DOFade(1, flipDuration);
-            if (descriptionRect != null)
-                descriptionRect.DOAnchorPos(descriptionHomePosition, flipDuration).SetEase(Ease.OutCubic);
-            card.DOScaleX(1, flipDuration * 0.5f);
+            descriptionGroup.interactable = true;
         });
     }
 
@@ -97,6 +167,7 @@ public sealed class EventCardView : MonoBehaviour
     {
         if (!IsOpen) return;
         IsOpen = false;
+        revealMotion?.Kill();
         if (descriptionText != null) descriptionText.DOKill();
         if (descriptionGroup != null) descriptionGroup.DOKill();
         if (descriptionRect != null) descriptionRect.DOKill();
@@ -114,6 +185,7 @@ public sealed class EventCardView : MonoBehaviour
         {
             descriptionGroup.alpha = 0;
             descriptionGroup.blocksRaycasts = false;
+            descriptionGroup.interactable = false;
         }
         if (descriptionRect != null) descriptionRect.anchoredPosition = descriptionHomePosition;
         if (backdrop != null)
@@ -122,8 +194,22 @@ public sealed class EventCardView : MonoBehaviour
             backdrop.blocksRaycasts = false;
             backdrop.gameObject.SetActive(false);
         }
-        if (card != null) card.localScale = Vector3.one;
-        if (cardImage != null) cardImage.color = frontColor;
+        if (card != null)
+        {
+            card.sizeDelta = originalCardSize;
+            card.anchoredPosition = CenteredPosition(card);
+            card.localScale = Vector3.one;
+            card.localRotation = Quaternion.identity;
+        }
+        if (cardImage != null)
+        {
+            cardImage.sprite = originalSprite;
+            cardImage.color = frontColor;
+            cardImage.preserveAspect = originalPreserveAspect;
+        }
+        if (titleText != null) titleText.transform.localRotation = Quaternion.identity;
+        if (revealButton != null) revealButton.gameObject.SetActive(true);
+        if (skipButton != null) skipButton.gameObject.SetActive(true);
         IsOpen = false;
     }
 }

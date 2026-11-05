@@ -70,20 +70,19 @@ public sealed class ActionResolver : MonoBehaviour
     private ActivityCardDrag pendingPlotCard;
     private ActivityKind pendingPlotAction;
     private int busyWorkers;
+    private int replayAnimations;
     private WorkerAssignment pendingFoodWorker;
     private ActivityCardDrag pendingFoodCard;
     private bool pendingFoodPlus;
     private GatheringTask[] forestTasks;
     private GatheringTask[] fishingTasks;
     private GatheringTask activeMinigame;
-    private ActivityKind? lastCardKind;
-    private WorkerAssignment lastCardWorker;
     private readonly System.Collections.Generic.Dictionary<WorkerAssignment, Tween> movements = new();
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> busyMovements = new();
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> returningHome = new();
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> working = new();
 
-    public bool IsBusy => busyWorkers > 0 || pendingFoodWorker != null ||
+    public bool IsBusy => busyWorkers > 0 || replayAnimations > 0 || pendingFoodWorker != null ||
         HasGatheringWorker(forestTasks) || HasGatheringWorker(fishingTasks);
     public bool GatheringNeedsPlayer => NeedsGatheringPlayer(forestTasks) ||
         NeedsGatheringPlayer(fishingTasks);
@@ -165,8 +164,15 @@ public sealed class ActionResolver : MonoBehaviour
     public void TryAssign(WorkerAssignment worker, ActivityKind activity, string activityName,
         ActivityCardDrag card = null)
     {
+        TryAssignInternal(worker, activity, activityName, card, false);
+    }
+
+    private void TryAssignInternal(WorkerAssignment worker, ActivityKind activity,
+        string activityName, ActivityCardDrag card, bool replayAnimationComplete)
+    {
         if (dayCycle == null || !dayCycle.CanAcceptActions)
             return;
+        if (replayAnimations > 0 && !replayAnimationComplete) return;
         if (pendingFoodWorker != null)
         {
             feedback.ShowMessage("Confirme ou cancele o preparo de comida primeiro.");
@@ -191,18 +197,39 @@ public sealed class ActionResolver : MonoBehaviour
         bool replaying = activity == ActivityKind.Replay;
         if (replaying)
         {
-            if (lastCardKind == null || !CanReplay(lastCardKind.Value))
+            ActivityKind? repeated = worker.LastActivity;
+            if (repeated == null || !CanReplay(repeated.Value))
             {
-                feedback.ShowMessage("Replay exige uma última carta de ação válida.");
+                feedback.ShowMessage("Replay exige uma ação anterior desse trabalhador.");
+                card?.PlayRejectedReplay();
                 return;
             }
-            if (lastCardKind == ActivityKind.Coffee)
+            if (!replayAnimationComplete && card != null)
             {
-                if (worker != lastCardWorker)
+                ActivityCardAvailability hand = card.transform.parent
+                    .GetComponentInChildren<ActivityCardAvailability>(true);
+                bool disposable = repeated == ActivityKind.BuildFence ||
+                    repeated == ActivityKind.BuildHouse;
+                if (disposable && (hand == null || !hand.HasDisposable(repeated.Value)))
                 {
-                    feedback.ShowMessage("Use Replay no trabalhador que recebeu Cafézinho.");
+                    feedback.ShowMessage("Replay precisa da carta descartável na mão.");
+                    card.PlayRejectedReplay();
                     return;
                 }
+                AssignmentVersion++;
+                replayAnimations++;
+                ActivityKind revealed = repeated.Value;
+                card.PlayReplay(worker, revealed, () =>
+                {
+                    replayAnimations--;
+                    TryAssignInternal(worker, ActivityKind.Replay, activityName, card, true);
+                });
+                if (disposable) hand.ConsumeReplayDisposable(revealed);
+                CardUsed?.Invoke(card);
+                return;
+            }
+            if (repeated == ActivityKind.Coffee)
+            {
                 worker.ReplaceCoffeeWithReplay();
                 worker.Select();
                 worker.SetStatus("duas ações disponíveis");
@@ -210,7 +237,7 @@ public sealed class ActionResolver : MonoBehaviour
                 feedback.ShowMessage("Replay interrompeu o Cafézinho: duas ações disponíveis.");
                 return;
             }
-            activity = lastCardKind.Value;
+            activity = repeated.Value;
         }
         if (activity == ActivityKind.Coffee)
         {
@@ -229,7 +256,7 @@ public sealed class ActionResolver : MonoBehaviour
         }
         if (activity == ActivityKind.Gamble)
         {
-            if (resources == null || !resources.TrySpendCoins(gambleStake))
+            if (resources == null || resources.Coins < gambleStake)
             {
                 feedback.ShowMessage("Faltam moedas para a aposta.");
                 return;
@@ -246,10 +273,11 @@ public sealed class ActionResolver : MonoBehaviour
                 bool won = Random.value < 0.5f;
                 if (won)
                 {
-                    resources.AddCoins(gambleStake * 2);
+                    resources.AddCoins(gambleStake);
                     if (resourceHud != null) resourceHud.FlyFromWorld(ResourceKind.Coins,
-                        gambleStake * 2, worker.transform.position + Vector3.up);
+                        gambleStake, worker.transform.position + Vector3.up);
                 }
+                else resources.TrySpendCoins(gambleStake);
                 worker.SetStatus(won ? "aposta vencida" : "aposta perdida");
                 feedback.ShowMessage(won ? "Jogo do Bicho: +" + gambleStake + " moedas líquidas." :
                     "Jogo do Bicho: -" + gambleStake + " moedas.");
@@ -262,19 +290,6 @@ public sealed class ActionResolver : MonoBehaviour
             CommitAction(worker, activity, activityName, card);
             worker.ScheduleExtraAction();
             feedback.ShowMessage("Descanso: ação extra amanhã. Alimentação normal hoje.");
-            SendWorkerHome(worker);
-            return;
-        }
-        if (activity == ActivityKind.FeedAnimals)
-        {
-            if (!dayCycle.TryRepeatAnimalProduction(out int milk, out int eggs))
-            {
-                feedback.ShowMessage("Nenhum animal produziu recursos hoje.");
-                return;
-            }
-            ClearPendingPlot();
-            CommitAction(worker, activity, "distribuindo ração", card);
-            feedback.ShowMessage("Ração: +" + milk + " leite e +" + eggs + " ovos.");
             SendWorkerHome(worker);
             return;
         }
@@ -301,7 +316,8 @@ public sealed class ActionResolver : MonoBehaviour
             activity == ActivityKind.Harvest ||
             activity == ActivityKind.WateringCan || activity == ActivityKind.Fertilizer ||
             activity == ActivityKind.BuildFence || activity == ActivityKind.BuildHouse ||
-            activity == ActivityKind.PlaceCow || activity == ActivityKind.PlaceChicken)
+            activity == ActivityKind.PlaceCow || activity == ActivityKind.PlaceChicken ||
+            activity == ActivityKind.FeedAnimals)
         {
             SelectPlot(worker, activity, activityName, card);
             return;
@@ -327,8 +343,6 @@ public sealed class ActionResolver : MonoBehaviour
     private void RecordCard(ActivityKind activity, WorkerAssignment worker, ActivityCardDrag card)
     {
         AssignmentVersion++;
-        lastCardKind = card != null ? card.Kind : activity;
-        lastCardWorker = worker;
         CardUsed?.Invoke(card);
     }
 
@@ -384,7 +398,7 @@ public sealed class ActionResolver : MonoBehaviour
         pendingPlotWorker = worker;
         pendingPlotCard = card;
         pendingPlotAction = activity;
-        Plot.ShowAvailable(activity);
+        Plot.ShowAvailable(activity, dayCycle.CurrentDay, seedCatalog);
         if (activity == ActivityKind.BuildHouse) HouseSite.ShowAvailable();
         worker.Select();
         bool buildingHouse = activity == ActivityKind.BuildHouse;
@@ -420,12 +434,14 @@ public sealed class ActionResolver : MonoBehaviour
         MoveToGatheringArea(task);
     }
 
-    private void CompleteGathering(WorkerAssignment worker, ActivityKind activity, int rating)
+    private void CompleteGathering(WorkerAssignment worker, ActivityKind activity, int rating,
+        System.Action onResourcesCollected)
     {
         if (rating < 0)
         {
             worker.SetStatus("ação cancelada");
             feedback.ShowMessage("Minigame de coleta indisponível.");
+            onResourcesCollected?.Invoke();
             return;
         }
         worker.SetStatus("ação concluída");
@@ -435,18 +451,20 @@ public sealed class ActionResolver : MonoBehaviour
             gained = Mathf.Max(0, gained - worker.ProductionReduction);
             resources.AddWood(gained);
             if (resourceHud != null) resourceHud.FlyFromWorld(ResourceKind.Wood,
-                gained, worker.transform.position + Vector3.up);
+                gained, worker.transform.position + Vector3.up, 0f, onResourcesCollected);
+            else onResourcesCollected?.Invoke();
             if (dayEvents != null) dayEvents.RecordWood(gained);
             WoodGainedToday += gained;
             feedback.ShowMessage("+" + gained + " madeira");
         }
         else
         {
-            int gained = 1 + Mathf.Min(1, rating) +
-                (activity == ActivityKind.FishPlus ? 1 : 0);
+            int gained = activity == ActivityKind.FishPlus ?
+                2 + (rating > 0 ? 2 : 0) : 1 + (rating > 0 ? 1 : 0);
             resources.AddFish(gained);
             if (resourceHud != null) resourceHud.FlyFromWorld(ResourceKind.Fish,
-                gained, worker.transform.position + Vector3.up);
+                gained, worker.transform.position + Vector3.up, 0f, onResourcesCollected);
+            else onResourcesCollected?.Invoke();
             FishGainedToday += gained;
             feedback.ShowMessage("+" + gained + " peixe(s) guardados");
         }
@@ -475,11 +493,30 @@ public sealed class ActionResolver : MonoBehaviour
             case ActivityKind.PlantJerimum: PlantPlot(plot, CropType.Jerimum); break;
             case ActivityKind.Harvest: HarvestPlot(plot); break;
             case ActivityKind.WateringCan:
-            case ActivityKind.Fertilizer: AcceleratePlot(plot); break;
+            case ActivityKind.Fertilizer: ApplyCropImprovement(plot); break;
             case ActivityKind.BuildFence: FencePlot(plot); break;
             case ActivityKind.PlaceCow: PlaceAnimal(plot, AnimalKind.Cow); break;
             case ActivityKind.PlaceChicken: PlaceAnimal(plot, AnimalKind.Chicken); break;
+            case ActivityKind.FeedAnimals: FeedAnimals(plot); break;
         }
+    }
+
+    private void FeedAnimals(Plot plot)
+    {
+        if (plot.Animal == AnimalKind.None)
+        {
+            feedback.ShowMessage("Escolha um cercado com animal.");
+            return;
+        }
+        ActivityCardDrag card = pendingPlotCard;
+        WorkerAssignment worker = TakePendingWorker();
+        CommitAction(worker, ActivityKind.FeedAnimals, "distribuindo ração", card);
+        MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
+        {
+            if (dayCycle.TryRepeatAnimalProduction(out int milk, out int eggs))
+                feedback.ShowMessage("Ração: +" + milk + " leite e +" + eggs + " ovos.");
+            SendWorkerHome(worker);
+        });
     }
 
     private void PlaceAnimal(Plot plot, AnimalKind animal)
@@ -503,9 +540,9 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void FencePlot(Plot plot)
     {
-        if (plot.IsFenced)
+        if (!plot.CanUse(ActivityKind.BuildFence, dayCycle.CurrentDay, seedCatalog))
         {
-            feedback.ShowMessage("Esse terreno já está cercado.");
+            feedback.ShowMessage("A cerca exige um terreno vazio e não arado.");
             return;
         }
         ActivityCardDrag card = pendingPlotCard;
@@ -543,23 +580,31 @@ public sealed class ActionResolver : MonoBehaviour
         workers = updated.ToArray();
     }
 
-    private void AcceleratePlot(Plot plot)
+    private void ApplyCropImprovement(Plot plot)
     {
-        if (plot.IsEmpty || plot.IsReady(dayCycle.CurrentDay, seedCatalog))
+        ActivityKind activity = pendingPlotAction;
+        if (!plot.CanUse(activity, dayCycle.CurrentDay, seedCatalog))
         {
-            feedback.ShowMessage("Escolha uma plantação ainda em crescimento.");
+            feedback.ShowMessage(activity == ActivityKind.Fertilizer ?
+                "Escolha uma plantação que ainda não recebeu adubo." :
+                "Escolha uma plantação ainda em crescimento.");
             return;
         }
-        ActivityKind activity = pendingPlotAction;
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
         CommitAction(worker, activity, activity.ToString(), card);
         MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
         {
-            plot.AdvanceGrowth(1);
-            plot.RefreshGrowth(dayCycle.CurrentDay, seedCatalog);
-            worker.SetStatus("crescimento acelerado");
-            feedback.ShowMessage("Plantação avançou um dia.");
+            if (activity == ActivityKind.Fertilizer) plot.Fertilize();
+            else
+            {
+                plot.AdvanceGrowth(1);
+                plot.RefreshGrowth(dayCycle.CurrentDay, seedCatalog);
+            }
+            worker.SetStatus(activity == ActivityKind.Fertilizer ? "plantação adubada" :
+                "crescimento acelerado");
+            feedback.ShowMessage(activity == ActivityKind.Fertilizer ?
+                "Adubo: produção dobrada na colheita." : "Plantação avançou um dia.");
             SendWorkerHome(worker);
         });
     }
@@ -630,7 +675,8 @@ public sealed class ActionResolver : MonoBehaviour
             {
                 ResourceKind kind = crop == CropType.Corn ? ResourceKind.Corn :
                     crop == CropType.Pumpkin ? ResourceKind.Pumpkin : ResourceKind.Jerimum;
-                resourceHud.FlyFromWorld(kind, gained, plot.transform.position + Vector3.up);
+                resourceHud.FlyFromWorld(kind, gained, plot.transform.position + Vector3.up,
+                    0.8f);
             }
             CropsStoredToday += gained;
             CropsHarvestedToday++;
@@ -932,9 +978,9 @@ public sealed class ActionResolver : MonoBehaviour
             task.Arrived = false;
             task.Started = false;
             activeMinigame = null;
-            communityCamera.SetFollowLocked(false);
-            communityCamera.ReturnToCommunity();
-            CompleteGathering(worker, task.SelectedActivity, rating);
+            communityCamera.HoldCurrentView();
+            CompleteGathering(worker, task.SelectedActivity, rating,
+                communityCamera.ReturnToCommunity);
             SendGatheringWorkerHome(worker);
             UpdateVisitButton(forestTasks[0]);
             UpdateVisitButton(fishingTasks[0]);

@@ -13,6 +13,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     [SerializeField] private ResourceBank resources;
     [SerializeField] private SeedMerchant merchant;
     [SerializeField] private ActionResolver actions;
+    [SerializeField] private DayCycle dayCycle;
     [SerializeField] private Camera worldCamera;
     [SerializeField] private DragCursorPreview dragPreview;
     [Header("Disposição da mão")]
@@ -36,7 +37,10 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     [SerializeField] private ActivityCardDrag testCardSource;
 
     private readonly List<ActivityCardDrag> shown = new List<ActivityCardDrag>();
+    private readonly List<ActivityCardDrag> spent = new List<ActivityCardDrag>();
+    private readonly List<ActivityCardDrag> deckOrder = new List<ActivityCardDrag>();
     private readonly List<ActivityCardDrag> testCards = new List<ActivityCardDrag>();
+    private readonly List<ActivityKind> pendingRewards = new List<ActivityKind>();
     private ActivityCardDrag hovered;
     private ActivityCardDrag dragging;
     private Tween shopPositionTween;
@@ -53,9 +57,32 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private float normalScale = 1f;
     private Vector2 lastContainerSize;
     private int nextCardId;
-    public bool HasRoom => shown.Count < maxHandCards || testCards.Count > 0;
-    public int FreeSlots => Mathf.Max(0, maxHandCards - shown.Count + testCards.Count);
+    private bool initialized;
+    private bool ducked;
+    private bool entranceSuspended;
+    [SerializeField, Min(0.1f)] private float dayExitDuration = 0.38f;
+    [SerializeField, Min(0f)] private float dayExitWaveDelay = 0.07f;
+    public bool HasRoom => shown.Count + spent.Count + pendingRewards.Count < maxHandCards ||
+        testCards.Count > 0;
+    public int FreeSlots => Mathf.Max(0, maxHandCards - shown.Count - spent.Count -
+        pendingRewards.Count + testCards.Count);
     public bool ContainsCard(ActivityCardDrag card) => shown.Contains(card);
+    public bool HasDisposable(ActivityKind kind) => FindDisposable(kind) != null;
+    public bool ConsumeReplayDisposable(ActivityKind kind)
+    {
+        ActivityCardDrag card = FindDisposable(kind);
+        if (card == null) return false;
+        OnCardUsed(card);
+        return true;
+    }
+
+    private ActivityCardDrag FindDisposable(ActivityKind kind)
+    {
+        if (kind != ActivityKind.BuildFence && kind != ActivityKind.BuildHouse) return null;
+        foreach (ActivityCardDrag card in shown)
+            if (card != null && card.Kind == kind) return card;
+        return null;
+    }
     public RectTransform DragBoundary => (RectTransform)transform.parent;
 
     private void OnEnable()
@@ -70,6 +97,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (resources != null) resources.Changed += Refresh;
         if (merchant != null) merchant.AvailabilityChanged += Refresh;
         if (actions != null) actions.CardUsed += OnCardUsed;
+        if (dayCycle == null) dayCycle = FindFirstObjectByType<DayCycle>();
+        if (dayCycle != null) dayCycle.DayChanged += OnDayChanged;
         Refresh();
     }
 
@@ -82,6 +111,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (resources != null) resources.Changed -= Refresh;
         if (merchant != null) merchant.AvailabilityChanged -= Refresh;
         if (actions != null) actions.CardUsed -= OnCardUsed;
+        if (dayCycle != null) dayCycle.DayChanged -= OnDayChanged;
+        DOTween.Kill(this);
         shopPositionTween?.Kill();
         ClearHover(true);
         if (dragging != null) dragging.CancelDrag();
@@ -117,7 +148,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             ClearHover(true);
             Layout(true);
         }
-        if (!pointerInside || Mouse.current == null) return;
+        if (entranceSuspended || !pointerInside || Mouse.current == null) return;
         SetHover(CardAt(Mouse.current.position.ReadValue(), null));
     }
 
@@ -125,8 +156,9 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     {
         if (!Application.isPlaying || cards == null || resources == null) return;
         bool changed = false;
-        if (shown.Count == 0)
+        if (!initialized)
         {
+            initialized = true;
             foreach (ActivityCardDrag card in cards)
             {
                 if (card == null || IsSeed(card.Kind) || card.Kind == ActivityKind.PrepareFood ||
@@ -134,6 +166,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
                     card.Kind == ActivityKind.BuildHouse || card.Kind == ActivityKind.BuildFence) continue;
                 SetVisible(card, true);
                 shown.Add(card);
+                deckOrder.Add(card);
             }
             foreach (ActivityCardDrag card in cards)
                 if (card != null && card.Kind == ActivityKind.PrepareFood)
@@ -144,7 +177,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         foreach (ActivityCardDrag card in cards)
             if (card != null && card.Kind == ActivityKind.BuySeeds)
             {
-                SetVisible(card, true);
+                SetVisible(card, !entranceSuspended);
                 RectTransform shopCard = (RectTransform)card.transform;
                 float targetY = merchant != null && merchant.IsAvailable ? 77f : -43f;
                 shopPositionTween?.Kill();
@@ -178,39 +211,146 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private void OnCardUsed(ActivityCardDrag card)
     {
         if (card == null || !shown.Contains(card)) return;
-        if (card.Kind == ActivityKind.BuildFence || card.Kind == ActivityKind.BuildHouse)
-        {
-            DissolveAndRemove(card);
-            return;
-        }
-        // Cartas permanentes continuam disponíveis; o trabalhador controla as ações.
-    }
-
-    private void DissolveAndRemove(ActivityCardDrag card)
-    {
         ClearHover(true);
         shown.Remove(card);
-        Shader shader = Shader.Find("UI/CardDissolve");
-        Graphic[] graphics = card.GetComponentsInChildren<Graphic>(true);
-        var materials = new List<Material>();
-        foreach (Graphic graphic in graphics)
+        if (card.Kind == ActivityKind.BuildFence || card.Kind == ActivityKind.BuildHouse)
         {
-            if (graphic == null) continue;
-            if (shader != null)
-            {
-                Material material = new Material(shader);
-                graphic.material = material;
-                materials.Add(material);
-                material.DOFloat(1f, "_Cutoff", 0.45f);
-            }
-            else graphic.DOFade(0f, 0.45f);
+            deckOrder.Remove(card);
+            testCards.Remove(card);
+            card.FadeOut(() => { if (card != null) Destroy(card.gameObject); });
         }
-        DOVirtual.DelayedCall(0.45f, () =>
+        else
         {
-            foreach (Material material in materials) if (material != null) Destroy(material);
-            if (card != null) Destroy(card.gameObject);
-        });
+            spent.Add(card);
+            card.FadeOut(() => { if (card != null) card.gameObject.SetActive(false); });
+        }
+        Layout(true, true);
+    }
+
+    private void OnDayChanged()
+    {
+        AnimateDayEntrance(true);
+    }
+
+    public void ReturnAfterCancelledDay()
+    {
+        AnimateDayEntrance(false);
+    }
+
+    private void AnimateDayEntrance(bool returnSpent)
+    {
+        entranceSuspended = false;
+        if (returnSpent) AddPendingRewards();
+        Refresh();
+        if (!initialized || shown.Count == 0 && spent.Count == 0) return;
+        ClearHover(true);
+        ducked = false;
         Layout(true);
+        int returningCount = returnSpent ? spent.Count : 0;
+        float waveEnd = 0f;
+        for (int i = 0; i < shown.Count; i++)
+        {
+            ActivityCardDrag card = shown[i];
+            SetVisible(card, true);
+            RectTransform rect = (RectTransform)card.transform;
+            Vector2 target = CardPosition(i);
+            rect.DOKill();
+            rect.anchoredPosition = new Vector2(target.x, -rect.rect.height * normalScale - 80f);
+            float delay = i * 0.07f;
+            rect.DOAnchorPos(target, 0.42f).SetDelay(delay).SetEase(Ease.OutBack);
+            rect.DOLocalRotate(new Vector3(0f, 0f, CardAngle(target.x)), 0.42f)
+                .SetDelay(delay).SetEase(Ease.OutCubic);
+            waveEnd = delay + 0.42f;
+        }
+        if (returningCount > 0)
+            DOVirtual.DelayedCall(waveEnd + 0.08f, ReturnSpentCards).SetTarget(this);
+    }
+
+    private void AddPendingRewards()
+    {
+        for (int i = 0; i < pendingRewards.Count;)
+        {
+            if (AddCard(pendingRewards[i], false)) pendingRewards.RemoveAt(i);
+            else i++;
+        }
+    }
+
+    public void SuspendEntranceForEvent()
+    {
+        if (!initialized) Refresh();
+        entranceSuspended = true;
+        ClearHover(true);
+        foreach (ActivityCardDrag card in shown)
+            if (card != null) SetVisible(card, false);
+        foreach (ActivityCardDrag card in cards)
+            if (card != null && card.Kind == ActivityKind.BuySeeds) SetVisible(card, false);
+    }
+
+    public void ExitForDay(System.Action onExited)
+    {
+        ClearHover(true);
+        entranceSuspended = true;
+        pointerInside = false;
+        float waveEnd = 0f;
+        for (int i = 0; i < shown.Count; i++)
+        {
+            ActivityCardDrag card = shown[i];
+            if (card == null || !card.gameObject.activeSelf) continue;
+            RectTransform rect = (RectTransform)card.transform;
+            rect.DOKill();
+            float delay = i * dayExitWaveDelay;
+            rect.DOAnchorPosY(-rect.rect.height * normalScale - 80f, dayExitDuration)
+                .SetDelay(delay).SetEase(Ease.InCubic);
+            waveEnd = Mathf.Max(waveEnd, delay + dayExitDuration);
+        }
+        foreach (ActivityCardDrag card in cards)
+        {
+            if (card == null || card.Kind != ActivityKind.BuySeeds || !card.gameObject.activeSelf) continue;
+            RectTransform rect = (RectTransform)card.transform;
+            shopPositionTween?.Kill();
+            rect.DOKill();
+            rect.DOAnchorPosY(-rect.rect.height - 80f, dayExitDuration)
+                .SetEase(Ease.InCubic);
+            waveEnd = Mathf.Max(waveEnd, dayExitDuration);
+        }
+        DOVirtual.DelayedCall(waveEnd, () =>
+        {
+            foreach (ActivityCardDrag card in shown)
+                if (card != null) SetVisible(card, false);
+            foreach (ActivityCardDrag card in cards)
+                if (card != null && card.Kind == ActivityKind.BuySeeds) SetVisible(card, false);
+            onExited?.Invoke();
+        }).SetTarget(this);
+    }
+
+    private void ReturnSpentCards()
+    {
+        var returningCards = new List<ActivityCardDrag>(spent);
+        spent.Clear();
+        foreach (ActivityCardDrag card in returningCards)
+        {
+            if (card == null) continue;
+            card.RestoreAppearance();
+            card.gameObject.SetActive(true);
+            shown.Add(card);
+        }
+        shown.Sort((a, b) => deckOrder.IndexOf(a).CompareTo(deckOrder.IndexOf(b)));
+        Layout(true, true);
+        for (int i = 0; i < returningCards.Count; i++)
+        {
+            ActivityCardDrag card = returningCards[i];
+            if (card == null) continue;
+            int index = shown.IndexOf(card);
+            RectTransform rect = (RectTransform)card.transform;
+            Vector2 target = CardPosition(index);
+            rect.DOKill();
+            rect.anchoredPosition = new Vector2(target.x, -rect.rect.height * normalScale - 80f);
+            rect.localScale = Vector3.one * normalScale * 0.85f;
+            rect.DOAnchorPos(target, 0.38f).SetDelay(i * 0.08f).SetEase(Ease.OutBack);
+            rect.DOScale(normalScale, 0.38f).SetDelay(i * 0.08f).SetEase(Ease.OutBack);
+            rect.DOLocalRotate(new Vector3(0f, 0f, CardAngle(target.x)), 0.38f)
+                .SetDelay(i * 0.08f);
+        }
     }
 
     private int CountCards(ActivityKind kind)
@@ -261,6 +401,13 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public bool AddCard(ActivityKind kind) => AddCard(kind, true);
 
+    public bool QueueRewardCard(ActivityKind kind)
+    {
+        if (TemplateFor(kind) == null || !HasRoom) return false;
+        pendingRewards.Add(kind);
+        return true;
+    }
+
     public ActivityCardDrag TemplateFor(ActivityKind kind)
     {
         if (cardPrefabs != null)
@@ -275,7 +422,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private bool AddCard(ActivityKind kind, bool arrange)
     {
         ActivityCardDrag prefab = TemplateFor(kind);
-        if (prefab == null || shown.Count >= maxHandCards && !RemoveOneTestCard()) return false;
+        if (prefab == null || shown.Count + spent.Count >= maxHandCards &&
+            !RemoveOneTestCard()) return false;
         ActivityCardDrag copy = Instantiate(prefab, transform.parent);
         copy.name = prefab.name + " " + ++nextCardId;
         if (AddCard(copy, arrange)) return true;
@@ -288,14 +436,28 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private bool AddCard(ActivityCardDrag card, bool arrange)
     {
         if (card == null || shown.Contains(card)) return false;
-        if (shown.Count >= maxHandCards && !RemoveOneTestCard()) return false;
+        if (shown.Count + spent.Count >= maxHandCards && !RemoveOneTestCard()) return false;
         ClearHover(true);
         card.gameObject.SetActive(false);
         card.transform.SetParent(transform.parent, false);
         card.ConfigureRuntime(worldCamera, dragPreview);
         card.gameObject.SetActive(true);
         shown.Add(card);
-        if (arrange) Layout(true);
+        deckOrder.Add(card);
+        if (arrange)
+        {
+            Layout(true, true);
+            int index = shown.IndexOf(card);
+            RectTransform rect = (RectTransform)card.transform;
+            Vector2 target = CardPosition(index);
+            rect.DOKill();
+            rect.anchoredPosition = new Vector2(target.x,
+                -rect.rect.height * normalScale - 80f);
+            rect.localScale = Vector3.one * normalScale * 0.85f;
+            rect.DOAnchorPos(target, 0.38f).SetEase(Ease.OutBack);
+            rect.DOScale(normalScale, 0.38f).SetEase(Ease.OutBack);
+            rect.DOLocalRotate(new Vector3(0f, 0f, CardAngle(target.x)), 0.38f);
+        }
         return true;
     }
 
@@ -304,6 +466,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (card == null || !shown.Contains(card)) return false;
         ClearHover(true);
         shown.Remove(card);
+        deckOrder.Remove(card);
         card.gameObject.SetActive(false);
         Destroy(card.gameObject);
         Layout(true);
@@ -347,7 +510,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (card.gameObject.activeSelf != visible) card.gameObject.SetActive(visible);
     }
 
-    private void Layout(bool orderCards)
+    private void Layout(bool orderCards, bool animate = false)
     {
         if (shown.Count == 0) return;
         RectTransform area = (RectTransform)transform.parent;
@@ -386,14 +549,26 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         firstCenter = -spacing * (shown.Count - 1) * 0.5f;
         for (int i = 0; i < shown.Count; i++)
         {
-            RectTransform rect = shown[i].GetComponent<RectTransform>();
+            ActivityCardDrag card = shown[i];
+            RectTransform rect = card.GetComponent<RectTransform>();
+            if (card == dragging || card.IsDragging || card.IsReturning) continue;
             rect.DOKill();
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
             rect.pivot = new Vector2(0.5f, 0f);
             Vector2 position = CardPosition(i);
-            rect.anchoredPosition = position;
-            rect.localRotation = Quaternion.Euler(0f, 0f, CardAngle(position.x));
-            rect.localScale = Vector3.one * normalScale;
+            if (animate)
+            {
+                rect.DOAnchorPos(position + Vector2.down * (ducked ? 40f : 0f), 0.24f)
+                    .SetEase(Ease.OutCubic);
+                rect.DOLocalRotate(new Vector3(0f, 0f, CardAngle(position.x)), 0.24f);
+                rect.DOScale(normalScale, 0.24f);
+            }
+            else
+            {
+                rect.anchoredPosition = position;
+                rect.localRotation = Quaternion.Euler(0f, 0f, CardAngle(position.x));
+                rect.localScale = Vector3.one * normalScale;
+            }
         }
         if (orderCards) OrderCards();
     }
@@ -415,7 +590,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public bool IsRaycastLocationValid(Vector2 screenPoint, Camera eventCamera)
     {
-        if (shown.Count == 0) return false;
+        if (entranceSuspended || shown.Count == 0) return false;
         for (int i = 0; i < shown.Count; i++)
             if (!shown[i].IsReturning && ContainsCard(i, screenPoint, eventCamera)) return true;
         return false;
@@ -594,7 +769,25 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public void OnDrag(PointerEventData eventData)
     {
-        if (dragging != null) dragging.OnDrag(eventData);
+        if (dragging == null) return;
+        dragging.OnDrag(eventData);
+        UpdateDucked(eventData.position, eventData.pressEventCamera);
+    }
+
+    public void UpdateDucked(Vector2 screenPosition, Camera eventCamera)
+    {
+        bool outside = !RectTransformUtility.RectangleContainsScreenPoint(DragBoundary,
+            screenPosition, eventCamera);
+        if (outside == ducked) return;
+        ducked = outside;
+        Layout(true, true);
+    }
+
+    public void EndExternalDrag()
+    {
+        if (!ducked) return;
+        ducked = false;
+        Layout(true, true);
     }
 
     public void OnEndDrag(PointerEventData eventData)
@@ -602,6 +795,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (dragging == null) return;
         dragging.OnEndDrag(eventData);
         dragging = null;
+        ducked = false;
+        Layout(true, true);
         if (pointerInside) SetHover(CardAt(eventData.position, eventData.enterEventCamera));
     }
 

@@ -28,22 +28,21 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     public AnimalKind Animal { get; private set; }
     public int PlantedDay { get; private set; }
     private int growthAdjustment;
-    private Vector3 surfaceBaseScale;
-    private Vector3 surfaceBaseWorldSize;
-    private Vector3 surfaceBaseLocalPosition;
+    private bool fertilized;
+    private Bounds surfaceBounds;
     private float workClearance = 1.3f;
     private Vector3[] fenceBasePositions;
     private Vector3[] fenceBaseScales;
-    private bool joinedHorizontally;
-    private bool joinedVertically;
-    private Sequence joinedMotion;
+    private JoinedVisual joinedVisual;
+    private bool fenceInitialized;
     private Transform selectionOutline;
     private Mesh selectionMesh;
     private Material selectionMaterial;
     private bool pointerOver;
     private Transform animalVisual;
     private static readonly List<Plot> allPlots = new List<Plot>();
-    private static Tween fenceTransition;
+    private static readonly Dictionary<string, JoinedVisual> joinedVisuals =
+        new Dictionary<string, JoinedVisual>();
     public bool IsEmpty => Crop == CropType.None;
     public Vector3 WorkPosition => transform.position + Vector3.back * workClearance;
     public event Action StateChanged;
@@ -52,10 +51,8 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     {
         if (surfaceRenderer != null)
         {
-            surfaceBaseScale = surfaceRenderer.transform.localScale;
-            surfaceBaseLocalPosition = surfaceRenderer.transform.localPosition;
-            surfaceBaseWorldSize = surfaceRenderer.bounds.size;
-            workClearance = surfaceRenderer.bounds.extents.z + 0.5f;
+            surfaceBounds = surfaceRenderer.bounds;
+            workClearance = surfaceBounds.extents.z + 0.5f;
         }
         if (fenceParts != null)
         {
@@ -74,8 +71,11 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     private void OnDisable()
     {
         allPlots.Remove(this);
-        joinedMotion?.Kill();
-        if (allPlots.Count == 0) fenceTransition?.Kill();
+        if (allPlots.Count == 0)
+        {
+            foreach (JoinedVisual joined in joinedVisuals.Values) joined.Dispose();
+            joinedVisuals.Clear();
+        }
         SetHighlight(false);
     }
 
@@ -89,35 +89,54 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     {
         pointerOver = true;
         PulseOutline();
+        joinedVisual?.SetHovered(true);
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
         pointerOver = false;
         PulseOutline();
+        joinedVisual?.SetHovered(false);
     }
 
-    public static void ShowAvailable(ActivityKind activity)
+    public bool CanUse(ActivityKind activity, int currentDay, SeedCatalog catalog)
+    {
+        return activity switch
+        {
+            ActivityKind.Plow or ActivityKind.BuildFence =>
+                !IsPlowed && !IsFenced && IsEmpty && Animal == AnimalKind.None,
+            ActivityKind.PlantCorn or ActivityKind.PlantPumpkin or ActivityKind.PlantJerimum =>
+                IsPlowed && !IsFenced && IsEmpty && Animal == AnimalKind.None,
+            ActivityKind.PlaceCow or ActivityKind.PlaceChicken =>
+                IsFenced && IsEmpty && Animal == AnimalKind.None,
+            ActivityKind.FeedAnimals => IsFenced && Animal != AnimalKind.None,
+            ActivityKind.Harvest => !IsFenced && IsReady(currentDay, catalog),
+            ActivityKind.WateringCan => !IsFenced && !IsEmpty &&
+                !IsReady(currentDay, catalog) && catalog != null,
+            ActivityKind.Fertilizer => !IsFenced && !IsEmpty && !fertilized,
+            _ => false
+        };
+    }
+
+    public static void ShowAvailable(ActivityKind activity, int currentDay, SeedCatalog catalog)
     {
         foreach (Plot plot in allPlots)
         {
             if (plot == null) continue;
-            bool valid = activity == ActivityKind.Plow ?
-                !plot.IsPlowed && !plot.IsFenced && plot.Animal == AnimalKind.None :
-                activity == ActivityKind.BuildFence ? !plot.IsFenced :
-                activity == ActivityKind.PlaceCow || activity == ActivityKind.PlaceChicken ?
-                    plot.IsFenced && plot.IsEmpty && plot.Animal == AnimalKind.None :
-                (activity == ActivityKind.PlantCorn || activity == ActivityKind.PlantPumpkin ||
-                 activity == ActivityKind.PlantJerimum) && plot.IsPlowed && plot.IsEmpty &&
-                    !plot.IsFenced && plot.Animal == AnimalKind.None;
-            plot.SetHighlight(valid);
+            bool groupAvailable = plot.joinedVisual != null &&
+                plot.joinedVisual.AllCanUse(activity, currentDay, catalog);
+            plot.SetHighlight(!groupAvailable &&
+                plot.CanUse(activity, currentDay, catalog));
         }
+        foreach (JoinedVisual joined in joinedVisuals.Values)
+            joined.SetHighlight(joined.AllCanUse(activity, currentDay, catalog));
     }
 
     public static void ClearHighlights()
     {
         foreach (Plot plot in allPlots)
             if (plot != null) plot.SetHighlight(false);
+        foreach (JoinedVisual joined in joinedVisuals.Values) joined.SetHighlight(false);
     }
 
     private void SetHighlight(bool visible)
@@ -207,6 +226,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         Crop = crop;
         PlantedDay = currentDay;
         growthAdjustment = 0;
+        fertilized = false;
         if (cornVisual != null) cornVisual.SetActive(crop == CropType.Corn);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(crop == CropType.Pumpkin || crop == CropType.Jerimum);
         TintRootVisual(crop);
@@ -227,9 +247,9 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     public int HarvestYield(int currentDay, SeedCatalog catalog)
     {
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
-        return settings == null ? 0 : settings.foodYield +
+        return settings == null ? 0 : (settings.foodYield +
             Mathf.Max(0, currentDay + growthAdjustment - PlantedDay - settings.growthDays) *
-            settings.bonusYieldPerExtraDay;
+            settings.bonusYieldPerExtraDay) * (fertilized ? 2 : 1);
     }
 
     public void RefreshGrowth(int currentDay, SeedCatalog catalog)
@@ -266,6 +286,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     {
         CropType harvested = Crop;
         Crop = CropType.None;
+        fertilized = false;
         if (cornVisual != null) cornVisual.SetActive(false);
         if (pumpkinVisual != null) pumpkinVisual.SetActive(false);
         if (growthBar != null) growthBar.SetActive(false);
@@ -280,9 +301,16 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         StateChanged?.Invoke();
     }
 
+    public void Fertilize()
+    {
+        if (Crop == CropType.None || fertilized) return;
+        fertilized = true;
+        StateChanged?.Invoke();
+    }
+
     public void BuildFence()
     {
-        if (IsFenced) return;
+        if (IsPlowed || IsFenced || !IsEmpty || Animal != AnimalKind.None) return;
         IsFenced = true;
         if (fenceParts != null && fenceBasePositions != null) FormFencePerimeter();
         RefreshJoinedPlots();
@@ -349,49 +377,34 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         return true;
     }
 
-    private static void RefreshFencedPlots()
+    private static void RefreshFencedPlots() => RefreshJoinedPlots();
+
+    private void HideOriginalFenceParts()
     {
-        fenceTransition?.Kill();
-        float descentEnd = 0f;
-        foreach (Plot plot in allPlots)
+        if (fenceParts == null || fenceBasePositions == null) return;
+        fenceInitialized = false;
+        for (int i = 0; i < fenceParts.Length; i++)
         {
-            if (plot == null || !plot.IsFenced || plot.fenceParts == null ||
-                plot.fenceBasePositions == null) continue;
-            Plot[] neighbors = plot.FencedNeighbors();
-            for (int i = 0; i < plot.fenceParts.Length; i++)
-            {
-                GameObject part = plot.fenceParts[i];
-                if (part == null) continue;
-                Transform piece = part.transform;
-                piece.DOKill();
-                if (!part.activeSelf || plot.FenceTarget(i, neighbors, out _, out _)) continue;
-                int pieceIndex = i;
-                float delay = i * plot.fencePieceDelay;
-                descentEnd = Mathf.Max(descentEnd, delay + plot.fencePieceDuration);
-                piece.DOLocalMoveY(plot.fenceBasePositions[i].y - 0.45f,
-                    plot.fencePieceDuration).SetDelay(delay).SetEase(Ease.InSine)
-                    .OnComplete(() =>
-                    {
-                        part.SetActive(false);
-                        piece.localPosition = plot.fenceBasePositions[pieceIndex];
-                        piece.localScale = plot.fenceBaseScales[pieceIndex];
-                    });
-            }
+            GameObject part = fenceParts[i];
+            if (part == null) continue;
+            Transform piece = part.transform;
+            piece.DOKill();
+            if (!part.activeSelf) continue;
+            int index = i;
+            piece.DOLocalMoveY(fenceBasePositions[i].y - 0.45f,
+                fencePieceDuration).SetDelay(i * fencePieceDelay * 0.5f)
+                .SetEase(Ease.InSine).OnComplete(() =>
+                {
+                    part.SetActive(false);
+                    piece.localPosition = fenceBasePositions[index];
+                    piece.localScale = fenceBaseScales[index];
+                });
         }
-        fenceTransition = DOVirtual.DelayedCall(descentEnd, () =>
-        {
-            RefreshJoinedPlots();
-            foreach (Plot plot in allPlots)
-            {
-                if (plot == null || !plot.IsFenced || plot.fenceParts == null ||
-                    plot.fenceBasePositions == null) continue;
-                plot.FormFencePerimeter();
-            }
-        });
     }
 
     private void FormFencePerimeter()
     {
+        fenceInitialized = true;
         Plot[] neighbors = FencedNeighbors();
         for (int i = 0; i < fenceParts.Length; i++)
         {
@@ -502,58 +515,481 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     private static void RefreshJoinedPlots()
     {
+        var components = new Dictionary<string, List<Plot>>();
+        var visited = new HashSet<Plot>();
         foreach (Plot plot in allPlots)
         {
-            if (plot == null || plot.surfaceRenderer == null) continue;
-            float east = 0f, west = 0f, north = 0f, south = 0f;
-            foreach (Plot other in allPlots)
+            if (plot == null || plot.surfaceRenderer == null || visited.Contains(plot) ||
+                plot.Crop == CropType.None && plot.Animal == AnimalKind.None) continue;
+            var members = new List<Plot>();
+            var queue = new Queue<Plot>();
+            queue.Enqueue(plot);
+            visited.Add(plot);
+            while (queue.Count > 0)
             {
-                if (other == plot) continue;
-                bool sameCrop = !plot.IsFenced && !other.IsFenced &&
-                    plot.Crop != CropType.None && plot.Crop == other.Crop;
-                bool sameAnimal = plot.IsFenced && other.IsFenced &&
-                    plot.Animal != AnimalKind.None && plot.Animal == other.Animal;
-                if (!sameCrop && !sameAnimal) continue;
-                Vector3 offset = other.transform.position - plot.transform.position;
-                if (Mathf.Abs(offset.y) >= 0.2f) continue;
-                if (Mathf.Abs(offset.x) < plot.adjacentDistance && Mathf.Abs(offset.z) < 0.2f)
+                Plot current = queue.Dequeue();
+                members.Add(current);
+                foreach (Plot other in allPlots)
+                    if (other != null && !visited.Contains(other) && SameResource(current, other) &&
+                        Adjacent(current, other))
+                    {
+                        visited.Add(other);
+                        queue.Enqueue(other);
+                    }
+            }
+            if (members.Count < 2) continue;
+            var ids = new List<int>();
+            foreach (Plot member in members) ids.Add(member.GetInstanceID());
+            ids.Sort();
+            components[string.Join(",", ids)] = members;
+        }
+
+        var obsolete = new List<string>();
+        foreach (string key in joinedVisuals.Keys)
+            if (!components.ContainsKey(key)) obsolete.Add(key);
+        foreach (string key in obsolete)
+        {
+            joinedVisuals[key].Dispose(true);
+            joinedVisuals.Remove(key);
+        }
+        foreach (Plot plot in allPlots)
+            if (plot != null && plot.surfaceRenderer != null && plot.joinedVisual == null)
+                plot.surfaceRenderer.enabled = true;
+        foreach (KeyValuePair<string, List<Plot>> entry in components)
+        {
+            if (!joinedVisuals.TryGetValue(entry.Key, out JoinedVisual joined))
+            {
+                joined = new JoinedVisual(entry.Value);
+                joinedVisuals.Add(entry.Key, joined);
+            }
+            foreach (Plot member in entry.Value)
+            {
+                member.joinedVisual = joined;
+                member.surfaceRenderer.enabled = false;
+            }
+        }
+        foreach (Plot plot in allPlots)
+            if (plot != null && plot.IsFenced && plot.joinedVisual == null &&
+                !plot.fenceInitialized && plot.fenceParts != null)
+                plot.FormFencePerimeter();
+    }
+
+    private static bool SameResource(Plot a, Plot b) =>
+        (!a.IsFenced && !b.IsFenced && a.Crop != CropType.None && a.Crop == b.Crop) ||
+        (a.IsFenced && b.IsFenced && a.Animal != AnimalKind.None && a.Animal == b.Animal);
+
+    private static bool Adjacent(Plot a, Plot b)
+    {
+        Vector3 distance = b.transform.position - a.transform.position;
+        if (Mathf.Abs(distance.y) >= 0.2f) return false;
+        float x = Mathf.Abs(distance.x), z = Mathf.Abs(distance.z);
+        float reach = Mathf.Min(a.adjacentDistance, b.adjacentDistance);
+        return (x > 0.2f && x < reach && z < 0.2f) ||
+            (z > 0.2f && z < reach && x < 0.2f);
+    }
+
+    private struct BorderEdge
+    {
+        public bool Horizontal;
+        public float Line;
+        public float Start;
+        public float End;
+        public int Normal;
+        public BorderEdge(bool horizontal, float line, float start, float end, int normal)
+        {
+            Horizontal = horizontal;
+            Line = line;
+            Start = start;
+            End = end;
+            Normal = normal;
+        }
+    }
+
+    private sealed class JoinedVisual
+    {
+        private readonly List<Plot> members;
+        private readonly GameObject root;
+        private readonly Mesh surfaceMesh;
+        private readonly Mesh outlineMesh;
+        private readonly Material outlineMaterial;
+        private readonly Transform outline;
+        private readonly List<Transform> fencePieces = new List<Transform>();
+        private bool hovered;
+        public bool IsAnimalGroup { get; }
+
+        public bool AllCanUse(ActivityKind activity, int currentDay, SeedCatalog catalog)
+        {
+            foreach (Plot plot in members)
+                if (plot == null || !plot.CanUse(activity, currentDay, catalog)) return false;
+            return true;
+        }
+
+        public JoinedVisual(List<Plot> connected)
+        {
+            members = connected;
+            IsAnimalGroup = connected[0].Animal != AnimalKind.None;
+            var regions = BuildRegions(connected);
+            float left = float.MaxValue, right = float.MinValue;
+            float bottom = float.MaxValue, top = float.MinValue;
+            foreach (Rect region in regions)
+            {
+                left = Mathf.Min(left, region.xMin);
+                right = Mathf.Max(right, region.xMax);
+                bottom = Mathf.Min(bottom, region.yMin);
+                top = Mathf.Max(top, region.yMax);
+            }
+            Vector2 center = new Vector2((left + right) * 0.5f, (bottom + top) * 0.5f);
+            root = new GameObject("Área unificada - " + (IsAnimalGroup ? connected[0].Animal.ToString() :
+                connected[0].Crop.ToString()), typeof(MeshFilter), typeof(MeshRenderer),
+                typeof(MeshCollider), typeof(PlotJoinedSurface));
+            root.transform.SetParent(connected[0].transform.parent, true);
+            root.transform.position = new Vector3(center.x, 0f, center.y);
+            root.layer = connected[0].gameObject.layer;
+            float surfaceTop = connected[0].surfaceBounds.max.y + 0.002f;
+            float surfaceBottom = connected[0].surfaceBounds.min.y;
+            surfaceMesh = BuildSurface(regions, center, surfaceTop, surfaceBottom,
+                out List<BorderEdge> border);
+            root.GetComponent<MeshFilter>().sharedMesh = surfaceMesh;
+            root.GetComponent<MeshRenderer>().sharedMaterial =
+                connected[0].surfaceRenderer.sharedMaterial;
+            root.GetComponent<MeshCollider>().sharedMesh = surfaceMesh;
+            root.GetComponent<PlotJoinedSurface>().Configure(connected, SetHovered);
+
+            outlineMesh = BuildOutline(border, center, surfaceTop + 0.015f);
+            Shader shader = Resources.Load<Shader>("PlotOutline");
+            outlineMaterial = shader != null ? new Material(shader) : null;
+            var outlineObject = new GameObject("Contorno da área", typeof(MeshFilter),
+                typeof(MeshRenderer));
+            outline = outlineObject.transform;
+            outline.SetParent(root.transform, false);
+            outlineObject.GetComponent<MeshFilter>().sharedMesh = outlineMesh;
+            MeshRenderer outlineRenderer = outlineObject.GetComponent<MeshRenderer>();
+            outlineRenderer.sharedMaterial = outlineMaterial;
+            outlineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            outlineRenderer.receiveShadows = false;
+            outlineObject.SetActive(false);
+
+            if (IsAnimalGroup)
+            {
+                foreach (Plot plot in members) plot.HideOriginalFenceParts();
+                BuildFence(border, center);
+            }
+            root.transform.localScale = new Vector3(0.975f, 1f, 0.975f);
+            DOTween.Sequence().SetTarget(root.transform)
+                .Append(root.transform.DOScale(Vector3.one, 0.35f).SetEase(Ease.OutCubic))
+                .Append(root.transform.DOPunchScale(new Vector3(0.055f, 0f, 0.055f),
+                    0.26f, 4));
+        }
+
+        public void SetHighlight(bool visible)
+        {
+            if (outline == null || outlineMaterial == null) return;
+            outline.gameObject.SetActive(visible);
+            PulseOutline();
+        }
+
+        public void SetHovered(bool value)
+        {
+            hovered = value;
+            PulseOutline();
+        }
+
+        private void PulseOutline()
+        {
+            if (outline == null) return;
+            outline.DOKill();
+            outline.localScale = Vector3.one;
+            if (hovered && outline.gameObject.activeSelf)
+                outline.DOScale(1.045f, 0.35f).SetLoops(-1, LoopType.Yoyo)
+                    .SetEase(Ease.InOutSine);
+        }
+
+        public void Dispose(bool animateFence = false)
+        {
+            foreach (Plot plot in members)
+                if (plot != null)
                 {
-                    float gap = Mathf.Max(0f, Mathf.Abs(offset.x) -
-                        (plot.surfaceBaseWorldSize.x + other.surfaceBaseWorldSize.x) * 0.5f + 0.02f);
-                    if (offset.x > 0f) east = Mathf.Max(east, gap * 0.5f);
-                    else west = Mathf.Max(west, gap * 0.5f);
+                    plot.joinedVisual = null;
+                    if (plot.surfaceRenderer != null) plot.surfaceRenderer.enabled = true;
                 }
-                if (Mathf.Abs(offset.z) < plot.adjacentDistance && Mathf.Abs(offset.x) < 0.2f)
+            if (outline != null) outline.DOKill();
+            if (root != null)
+            {
+                root.transform.DOKill();
+                root.transform.localScale = Vector3.one;
+            }
+            if (animateFence && IsAnimalGroup && fencePieces.Count > 0 && root != null)
+            {
+                root.GetComponent<MeshRenderer>().enabled = false;
+                root.GetComponent<MeshCollider>().enabled = false;
+                if (outline != null) outline.gameObject.SetActive(false);
+                float finish = 0f;
+                for (int i = 0; i < fencePieces.Count; i++)
                 {
-                    float gap = Mathf.Max(0f, Mathf.Abs(offset.z) -
-                        (plot.surfaceBaseWorldSize.z + other.surfaceBaseWorldSize.z) * 0.5f + 0.02f);
-                    if (offset.z > 0f) north = Mathf.Max(north, gap * 0.5f);
-                    else south = Mathf.Max(south, gap * 0.5f);
+                    Transform piece = fencePieces[i];
+                    if (piece == null) continue;
+                    piece.DOKill();
+                    float delay = i * 0.012f;
+                    finish = delay + 0.2f;
+                    piece.DOLocalMoveY(piece.localPosition.y - 0.45f, 0.2f)
+                        .SetDelay(delay).SetEase(Ease.InSine);
+                }
+                DOVirtual.DelayedCall(finish, DestroyAssets);
+                return;
+            }
+            foreach (Transform piece in fencePieces) if (piece != null) piece.DOKill();
+            DestroyAssets();
+        }
+
+        private void DestroyAssets()
+        {
+            if (root != null) UnityEngine.Object.Destroy(root);
+            if (surfaceMesh != null) UnityEngine.Object.Destroy(surfaceMesh);
+            if (outlineMesh != null) UnityEngine.Object.Destroy(outlineMesh);
+            if (outlineMaterial != null) UnityEngine.Object.Destroy(outlineMaterial);
+        }
+
+        private static Plot Neighbor(List<Plot> plots, Plot origin, int x, int z)
+        {
+            if (origin == null) return null;
+            foreach (Plot plot in plots)
+            {
+                if (plot == origin || !Adjacent(origin, plot)) continue;
+                Vector3 offset = plot.transform.position - origin.transform.position;
+                if ((x != 0 && Mathf.Sign(offset.x) == x && Mathf.Abs(offset.z) < 0.2f) ||
+                    (z != 0 && Mathf.Sign(offset.z) == z && Mathf.Abs(offset.x) < 0.2f))
+                    return plot;
+            }
+            return null;
+        }
+
+        private static List<Rect> BuildRegions(List<Plot> plots)
+        {
+            const float overlap = 0.01f;
+            var regions = new List<Rect>();
+            foreach (Plot plot in plots)
+            {
+                Bounds bounds = plot.surfaceBounds;
+                regions.Add(new Rect(bounds.min.x, bounds.min.z, bounds.size.x, bounds.size.z));
+            }
+            foreach (Plot plot in plots)
+            {
+                Plot east = Neighbor(plots, plot, 1, 0);
+                Plot north = Neighbor(plots, plot, 0, 1);
+                Bounds own = plot.surfaceBounds;
+                if (east != null)
+                {
+                    Bounds next = east.surfaceBounds;
+                    float z0 = Mathf.Max(own.min.z, next.min.z);
+                    float z1 = Mathf.Min(own.max.z, next.max.z);
+                    if (next.min.x > own.max.x && z1 > z0)
+                        regions.Add(Rect.MinMaxRect(own.max.x - overlap, z0,
+                            next.min.x + overlap, z1));
+                }
+                if (north != null)
+                {
+                    Bounds next = north.surfaceBounds;
+                    float x0 = Mathf.Max(own.min.x, next.min.x);
+                    float x1 = Mathf.Min(own.max.x, next.max.x);
+                    if (next.min.z > own.max.z && x1 > x0)
+                        regions.Add(Rect.MinMaxRect(x0, own.max.z - overlap,
+                            x1, next.min.z + overlap));
+                }
+                if (east == null || north == null || Neighbor(plots, east, 0, 1) == null)
+                    continue;
+                Bounds right = east.surfaceBounds;
+                Bounds above = north.surfaceBounds;
+                if (right.min.x > own.max.x && above.min.z > own.max.z)
+                    regions.Add(Rect.MinMaxRect(own.max.x - overlap,
+                        own.max.z - overlap, right.min.x + overlap,
+                        above.min.z + overlap));
+            }
+            return regions;
+        }
+
+        private static List<float> Coordinates(List<Rect> regions, bool xAxis)
+        {
+            var values = new List<float>();
+            foreach (Rect region in regions)
+            {
+                values.Add(xAxis ? region.xMin : region.yMin);
+                values.Add(xAxis ? region.xMax : region.yMax);
+            }
+            values.Sort();
+            var unique = new List<float>();
+            foreach (float value in values)
+                if (unique.Count == 0 || value - unique[unique.Count - 1] > 0.001f)
+                    unique.Add(value);
+            return unique;
+        }
+
+        private static void AddQuad(List<Vector3> vertices, List<int> triangles,
+            Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            int first = vertices.Count;
+            vertices.Add(a); vertices.Add(b); vertices.Add(c); vertices.Add(d);
+            triangles.Add(first); triangles.Add(first + 1); triangles.Add(first + 2);
+            triangles.Add(first); triangles.Add(first + 2); triangles.Add(first + 3);
+        }
+
+        private static Mesh BuildSurface(List<Rect> regions, Vector2 center, float top,
+            float bottom, out List<BorderEdge> border)
+        {
+            List<float> xs = Coordinates(regions, true);
+            List<float> zs = Coordinates(regions, false);
+            var filled = new bool[xs.Count - 1, zs.Count - 1];
+            for (int x = 0; x < xs.Count - 1; x++)
+                for (int z = 0; z < zs.Count - 1; z++)
+                {
+                    Vector2 point = new Vector2((xs[x] + xs[x + 1]) * 0.5f,
+                        (zs[z] + zs[z + 1]) * 0.5f);
+                    foreach (Rect region in regions)
+                        if (region.Contains(point)) { filled[x, z] = true; break; }
+                }
+            var vertices = new List<Vector3>();
+            var triangles = new List<int>();
+            border = new List<BorderEdge>();
+            for (int x = 0; x < xs.Count - 1; x++)
+                for (int z = 0; z < zs.Count - 1; z++)
+                {
+                    if (!filled[x, z]) continue;
+                    float x0 = xs[x] - center.x, x1 = xs[x + 1] - center.x;
+                    float z0 = zs[z] - center.y, z1 = zs[z + 1] - center.y;
+                    AddQuad(vertices, triangles, new Vector3(x0, top, z0),
+                        new Vector3(x0, top, z1), new Vector3(x1, top, z1),
+                        new Vector3(x1, top, z0));
+                    if (z == 0 || !filled[x, z - 1])
+                    {
+                        border.Add(new BorderEdge(true, zs[z], xs[x], xs[x + 1], -1));
+                        AddQuad(vertices, triangles, new Vector3(x0, bottom, z0),
+                            new Vector3(x0, top, z0), new Vector3(x1, top, z0),
+                            new Vector3(x1, bottom, z0));
+                    }
+                    if (z == zs.Count - 2 || !filled[x, z + 1])
+                    {
+                        border.Add(new BorderEdge(true, zs[z + 1], xs[x], xs[x + 1], 1));
+                        AddQuad(vertices, triangles, new Vector3(x1, bottom, z1),
+                            new Vector3(x1, top, z1), new Vector3(x0, top, z1),
+                            new Vector3(x0, bottom, z1));
+                    }
+                    if (x == 0 || !filled[x - 1, z])
+                    {
+                        border.Add(new BorderEdge(false, xs[x], zs[z], zs[z + 1], -1));
+                        AddQuad(vertices, triangles, new Vector3(x0, bottom, z1),
+                            new Vector3(x0, top, z1), new Vector3(x0, top, z0),
+                            new Vector3(x0, bottom, z0));
+                    }
+                    if (x == xs.Count - 2 || !filled[x + 1, z])
+                    {
+                        border.Add(new BorderEdge(false, xs[x + 1], zs[z], zs[z + 1], 1));
+                        AddQuad(vertices, triangles, new Vector3(x1, bottom, z0),
+                            new Vector3(x1, top, z0), new Vector3(x1, top, z1),
+                            new Vector3(x1, bottom, z1));
+                    }
+                }
+            var mesh = new Mesh { name = "Solo unificado" };
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh BuildOutline(List<BorderEdge> border, Vector2 center, float y)
+        {
+            const float halfWidth = 0.035f;
+            var vertices = new List<Vector3>();
+            var triangles = new List<int>();
+            foreach (BorderEdge edge in border)
+            {
+                float a = edge.Start - (edge.Horizontal ? center.x : center.y);
+                float b = edge.End - (edge.Horizontal ? center.x : center.y);
+                float line = edge.Line - (edge.Horizontal ? center.y : center.x);
+                if (edge.Horizontal)
+                    AddQuad(vertices, triangles, new Vector3(a, y, line - halfWidth),
+                        new Vector3(a, y, line + halfWidth),
+                        new Vector3(b, y, line + halfWidth),
+                        new Vector3(b, y, line - halfWidth));
+                else
+                    AddQuad(vertices, triangles,
+                        new Vector3(line - halfWidth, y, a),
+                        new Vector3(line - halfWidth, y, b),
+                        new Vector3(line + halfWidth, y, b),
+                        new Vector3(line + halfWidth, y, a));
+            }
+            var mesh = new Mesh { name = "Contorno unificado" };
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private void BuildFence(List<BorderEdge> border, Vector2 center)
+        {
+            Plot source = members[0];
+            if (source.fenceParts == null || source.fenceParts.Length == 0 ||
+                source.fenceParts[0] == null) return;
+            Renderer original = source.fenceParts[0].GetComponent<Renderer>();
+            if (original == null || source.fenceBaseScales == null) return;
+            Transform fenceParent = source.fenceParts[0].transform.parent;
+            Vector3 parentScale = fenceParent.lossyScale;
+            float height = source.fenceBaseScales[0].y * Mathf.Abs(parentScale.y);
+            float thickness = source.fenceBaseScales[0].z * Mathf.Abs(parentScale.z);
+            float y = fenceParent.TransformPoint(source.fenceBasePositions[0]).y;
+            border.Sort((a, b) =>
+            {
+                int orientation = a.Horizontal.CompareTo(b.Horizontal);
+                if (orientation != 0) return orientation;
+                int line = a.Line.CompareTo(b.Line);
+                if (line != 0) return line;
+                int normal = a.Normal.CompareTo(b.Normal);
+                return normal != 0 ? normal : a.Start.CompareTo(b.Start);
+            });
+            var merged = new List<BorderEdge>();
+            foreach (BorderEdge edge in border)
+            {
+                int last = merged.Count - 1;
+                if (last >= 0 && merged[last].Horizontal == edge.Horizontal &&
+                    Mathf.Abs(merged[last].Line - edge.Line) < 0.001f &&
+                    merged[last].Normal == edge.Normal &&
+                    edge.Start <= merged[last].End + 0.001f)
+                {
+                    BorderEdge extended = merged[last];
+                    extended.End = Mathf.Max(extended.End, edge.End);
+                    merged[last] = extended;
+                }
+                else merged.Add(edge);
+            }
+            int pieceIndex = 0;
+            float startDelay = source.fencePieceDuration +
+                (source.fenceParts.Length - 1) * source.fencePieceDelay * 0.5f + 0.05f;
+            foreach (BorderEdge edge in merged)
+            {
+                int count = Mathf.Max(1, Mathf.CeilToInt((edge.End - edge.Start) / 0.45f));
+                float length = (edge.End - edge.Start) / count;
+                for (int i = 0; i < count; i++)
+                {
+                    GameObject part = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    part.name = "Cerca modular " + ++pieceIndex;
+                    part.transform.SetParent(root.transform, false);
+                    float middle = edge.Start + (i + 0.5f) * length;
+                    Vector3 position = edge.Horizontal ?
+                        new Vector3(middle - center.x, y,
+                            edge.Line - center.y - edge.Normal * thickness * 0.5f) :
+                        new Vector3(edge.Line - center.x - edge.Normal * thickness * 0.5f,
+                            y, middle - center.y);
+                    part.transform.localPosition = position - Vector3.up * 0.45f;
+                    part.transform.localScale = edge.Horizontal ?
+                        new Vector3(length + 0.015f, height, thickness) :
+                        new Vector3(thickness, height, length + 0.015f);
+                    UnityEngine.Object.Destroy(part.GetComponent<Collider>());
+                    part.GetComponent<Renderer>().sharedMaterial = original.sharedMaterial;
+                    fencePieces.Add(part.transform);
+                    part.transform.DOLocalMove(position, source.fencePieceDuration + 0.1f)
+                        .SetDelay(startDelay + pieceIndex * source.fencePieceDelay * 0.45f)
+                        .SetEase(Ease.OutBack);
                 }
             }
-            Transform surface = plot.surfaceRenderer.transform;
-            bool joinX = east > 0f || west > 0f;
-            bool joinZ = north > 0f || south > 0f;
-            bool newlyJoined = (joinX && !plot.joinedHorizontally) ||
-                (joinZ && !plot.joinedVertically);
-            plot.joinedHorizontally = joinX;
-            plot.joinedVertically = joinZ;
-            plot.joinedMotion?.Kill();
-            Vector3 target = new Vector3(plot.surfaceBaseScale.x *
-                    (1f + (east + west) / Mathf.Max(0.01f, plot.surfaceBaseWorldSize.x)),
-                plot.surfaceBaseScale.y,
-                plot.surfaceBaseScale.z *
-                    (1f + (north + south) / Mathf.Max(0.01f, plot.surfaceBaseWorldSize.z)));
-            Vector3 centerShift = plot.transform.InverseTransformVector(new Vector3(
-                (east - west) * 0.5f, 0f, (north - south) * 0.5f));
-            Vector3 targetPosition = plot.surfaceBaseLocalPosition + centerShift;
-            Sequence motion = DOTween.Sequence()
-                .Append(surface.DOScale(target, 0.38f).SetEase(Ease.OutSine))
-                .Join(surface.DOLocalMove(targetPosition, 0.38f).SetEase(Ease.OutSine));
-            plot.joinedMotion = motion;
-            if (newlyJoined)
-                motion.Append(surface.DOPunchScale(new Vector3(target.x * 0.025f, 0f,
-                    target.z * 0.025f), 0.18f, 1));
         }
     }
 }

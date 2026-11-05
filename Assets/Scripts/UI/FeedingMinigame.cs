@@ -13,36 +13,46 @@ public sealed class FeedingMinigame : MonoBehaviour
     [SerializeField] private Text[] workerLabels;
     [SerializeField] private RectTransform[] workerTargets;
     [SerializeField] private FeedingFoodIcon[] foodIcons;
+    [SerializeField] private Sprite preparedFoodSprite;
     [SerializeField] private Sprite fishSprite;
     [SerializeField] private Sprite cornSprite;
-    [SerializeField] private Sprite cropSprite;
+    [SerializeField] private Sprite cassavaSprite;
+    [SerializeField] private Sprite jerimumSprite;
+    [SerializeField] private Sprite eggSprite;
     [SerializeField] private Button finishButton;
+    [SerializeField] private Button backButton;
     [SerializeField, Min(0f)] private float entranceDuration = 0.45f;
     [SerializeField, Min(0f)] private float foodWaveDelay = 0.07f;
 
     private WorkerAssignment[] workers;
     private SaleItem?[] chosenFood;
     private Action<SaleItem?[]> completed;
+    private Action cancelled;
     private bool open;
     private FeedingFoodIcon reservedIcon;
+    private Tween backEntrance;
     private static readonly SaleItem[] FoodKinds = { SaleItem.Food, SaleItem.Fish,
         SaleItem.Corn, SaleItem.Pumpkin, SaleItem.Jerimum, SaleItem.Milk, SaleItem.Eggs };
 
     private void Awake()
     {
         if (finishButton != null) finishButton.onClick.AddListener(Finish);
+        if (backButton != null) backButton.onClick.AddListener(Cancel);
         Hide();
     }
 
     private void OnDestroy()
     {
         if (finishButton != null) finishButton.onClick.RemoveListener(Finish);
+        if (backButton != null) backButton.onClick.RemoveListener(Cancel);
+        backEntrance?.Kill();
         if (panel != null) panel.DOKill();
         foreach (FeedingFoodIcon icon in foodIcons)
             if (icon != null) icon.StopAnimation();
     }
 
-    public void Begin(WorkerAssignment[] dayWorkers, Action<SaleItem?[]> onCompleted)
+    public void Begin(WorkerAssignment[] dayWorkers, Action<SaleItem?[]> onCompleted,
+        Action onCancelled = null)
     {
         workers = dayWorkers;
         EnsureWorkerTargets(workers.Length);
@@ -50,7 +60,14 @@ public sealed class FeedingMinigame : MonoBehaviour
         reservedIcon = null;
         chosenFood = new SaleItem?[workers.Length];
         completed = onCompleted;
+        cancelled = onCancelled;
         open = true;
+        backEntrance?.Kill();
+        if (backButton != null)
+        {
+            backButton.gameObject.SetActive(false);
+            backButton.transform.localScale = Vector3.one;
+        }
         group.alpha = 1f;
         group.interactable = true;
         group.blocksRaycasts = true;
@@ -58,6 +75,24 @@ public sealed class FeedingMinigame : MonoBehaviour
         panel.localScale = Vector3.one * 0.92f;
         panel.DOScale(1f, entranceDuration).SetEase(Ease.OutBack);
         Refresh(true);
+        int visibleFoods = 0;
+        foreach (SaleItem kind in FoodKinds)
+            if (Stock(kind) > 0) visibleFoods++;
+        float waveEnd = entranceDuration + Mathf.Max(0, visibleFoods - 1) * foodWaveDelay;
+        backEntrance = DOVirtual.DelayedCall(waveEnd, ShowBackButton).SetTarget(this);
+    }
+
+    private void ShowBackButton()
+    {
+        if (!open || backButton == null) return;
+        RectTransform rect = (RectTransform)backButton.transform;
+        rect.DOKill();
+        rect.localScale = Vector3.zero;
+        backButton.gameObject.SetActive(true);
+        DOTween.Sequence()
+            .Append(rect.DOScale(1.1f, 0.26f).SetEase(Ease.OutCubic))
+            .Append(rect.DOScale(1f, 0.18f).SetEase(Ease.InOutSine))
+            .SetTarget(rect);
     }
 
     private void EnsureWorkerTargets(int count)
@@ -178,9 +213,7 @@ public sealed class FeedingMinigame : MonoBehaviour
             icon.gameObject.SetActive(visible);
             if (!visible) continue;
             SaleItem kind = FoodKinds[i];
-            icon.Configure(this, kind, kind == SaleItem.Fish ? fishSprite :
-                kind == SaleItem.Corn ? cornSprite :
-                kind == SaleItem.Pumpkin || kind == SaleItem.Jerimum ? cropSprite : null,
+            icon.Configure(this, kind, SpriteFor(kind),
                 foodCount != null ? foodCount.font : null);
             icon.SetQuantity(Stock(kind) - (reservedIcon == icon ? 1 : 0));
             icon.SetHome(new Vector2((visibleIndex - (visibleCount - 1) * 0.5f) * 73f, 54f),
@@ -188,6 +221,17 @@ public sealed class FeedingMinigame : MonoBehaviour
             visibleIndex++;
         }
     }
+
+    private Sprite SpriteFor(SaleItem kind) => kind switch
+    {
+        SaleItem.Food => preparedFoodSprite,
+        SaleItem.Fish => fishSprite,
+        SaleItem.Corn => cornSprite,
+        SaleItem.Pumpkin => cassavaSprite,
+        SaleItem.Jerimum => jerimumSprite,
+        SaleItem.Eggs => eggSprite,
+        _ => null
+    };
 
     private void RefreshLabels()
     {
@@ -217,11 +261,47 @@ public sealed class FeedingMinigame : MonoBehaviour
         Hide();
         Action<SaleItem?[]> callback = completed;
         completed = null;
+        cancelled = null;
         callback?.Invoke(chosenFood);
+    }
+
+    public void Cancel()
+    {
+        if (!open) return;
+        open = false;
+        if (reservedIcon != null) CancelReservation(reservedIcon);
+        foreach (SaleItem? food in chosenFood)
+        {
+            if (!food.HasValue) continue;
+            switch (food.Value)
+            {
+                case SaleItem.Food: resources.AddFood(1); break;
+                case SaleItem.Fish: resources.AddFish(1); break;
+                case SaleItem.Corn: resources.AddCrop(CropType.Corn, 1); break;
+                case SaleItem.Pumpkin: resources.AddCrop(CropType.Pumpkin, 1); break;
+                case SaleItem.Jerimum: resources.AddCrop(CropType.Jerimum, 1); break;
+                case SaleItem.Milk: resources.AddAnimalProducts(1, 0); break;
+                case SaleItem.Eggs: resources.AddAnimalProducts(0, 1); break;
+            }
+        }
+        foreach (FeedingFoodIcon icon in foodIcons)
+            if (icon != null) icon.StopAnimation();
+        Hide();
+        completed = null;
+        Action callback = cancelled;
+        cancelled = null;
+        callback?.Invoke();
     }
 
     private void Hide()
     {
+        backEntrance?.Kill();
+        if (backButton != null)
+        {
+            backButton.transform.DOKill();
+            backButton.transform.localScale = Vector3.one;
+            backButton.gameObject.SetActive(false);
+        }
         if (group == null) return;
         group.alpha = 0f;
         group.interactable = false;

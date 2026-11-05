@@ -34,12 +34,166 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private Tween dragCenterTween;
     private Quaternion homeRotation;
     private int dragSibling;
+    private Graphic[] fadeGraphics;
+    private Color[] fadeColors;
+    private bool replayAnimating;
 
     public ActivityKind Kind => activity;
     public string DisplayName => activityName;
     public string Description => description;
     public bool HasEffect => true;
     public bool IsReturning => returning;
+    public bool IsDragging => dragging;
+    public bool IsReplayAnimating => replayAnimating;
+
+    public void PlayRejectedReplay()
+    {
+        returning = true;
+        RectTransform rect = (RectTransform)transform;
+        rect.DOKill();
+        float center = rect.anchoredPosition.x;
+        DOTween.Sequence()
+            .Append(rect.DOAnchorPosX(center + 18f, 0.045f))
+            .Append(rect.DOAnchorPosX(center - 18f, 0.06f))
+            .Append(rect.DOAnchorPosX(center + 15f, 0.055f))
+            .Append(rect.DOAnchorPosX(center - 12f, 0.055f))
+            .Append(rect.DOAnchorPosX(center, 0.05f))
+            .OnComplete(AnimateReturn);
+    }
+
+    public void PlayReplay(WorkerAssignment worker, ActivityKind repeated,
+        System.Action onFinished)
+    {
+        Canvas canvas = GetComponentInParent<Canvas>();
+        RectTransform root = canvas != null ? canvas.rootCanvas.transform as RectTransform : null;
+        RectTransform rect = (RectTransform)transform;
+        if (root == null || worker == null)
+        {
+            onFinished?.Invoke();
+            return;
+        }
+        replayAnimating = true;
+        returning = true;
+        Image source = GetComponent<Image>();
+        ActivityCardDrag templateCard = transform.parent
+            .GetComponentInChildren<ActivityCardAvailability>(true)?.TemplateFor(repeated);
+        Image template = templateCard != null ? templateCard.GetComponent<Image>() : null;
+        Vector2 startScreen = RectTransformUtility.WorldToScreenPoint(canvas.worldCamera,
+            rect.TransformPoint(rect.rect.center));
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(root, startScreen,
+            canvas.worldCamera, out Vector2 start);
+        var shadeObject = new GameObject("Foco do Replay", typeof(RectTransform),
+            typeof(CanvasRenderer), typeof(Image));
+        RectTransform shade = (RectTransform)shadeObject.transform;
+        shade.SetParent(root, false);
+        shade.anchorMin = Vector2.zero;
+        shade.anchorMax = Vector2.one;
+        shade.offsetMin = shade.offsetMax = Vector2.zero;
+        Image shadeImage = shadeObject.GetComponent<Image>();
+        shadeImage.color = new Color(0f, 0f, 0f, 0f);
+        shadeImage.raycastTarget = false;
+        var ghostObject = new GameObject("Carta Replay", typeof(RectTransform),
+            typeof(CanvasRenderer), typeof(Image), typeof(CanvasGroup));
+        RectTransform ghost = (RectTransform)ghostObject.transform;
+        ghost.SetParent(root, false);
+        ghost.anchorMin = ghost.anchorMax = new Vector2(0.5f, 0.5f);
+        ghost.sizeDelta = rect.rect.size;
+        ghost.anchoredPosition = start;
+        ghost.localScale = rect.localScale;
+        Image image = ghostObject.GetComponent<Image>();
+        image.sprite = source != null ? source.sprite : null;
+        image.color = source != null ? source.color : Color.white;
+        image.preserveAspect = true;
+        image.raycastTarget = false;
+        CanvasGroup ghostGroup = ghostObject.GetComponent<CanvasGroup>();
+        CanvasGroup originalGroup = GetComponent<CanvasGroup>();
+        if (originalGroup == null) originalGroup = gameObject.AddComponent<CanvasGroup>();
+        originalGroup.alpha = 0f;
+        rect.anchoredPosition = originalPosition;
+        rect.localScale = originalScale;
+        rect.localRotation = homeRotation;
+        Vector2 workerScreen = Camera.main != null ?
+            (Vector2)Camera.main.WorldToScreenPoint(worker.transform.position + Vector3.up) :
+            new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(root, workerScreen,
+            canvas.worldCamera, out Vector2 destination);
+        Sequence sequence = DOTween.Sequence();
+        sequence.Append(shadeImage.DOFade(0.27f, 0.52f));
+        sequence.Append(ghost.DOAnchorPos(Vector2.zero, 0.58f).SetEase(Ease.OutCubic));
+        sequence.Join(ghost.DOScale(1.12f, 0.58f).SetEase(Ease.OutBack));
+        sequence.Append(ghost.DOPunchRotation(new Vector3(0f, 0f, 10f), 0.88f, 12));
+        sequence.AppendCallback(() =>
+        {
+            bool hasFinishedArt = template != null && template.sprite != null &&
+                !template.sprite.name.Contains("9-SlicedBox");
+            if (hasFinishedArt) image.sprite = template.sprite;
+            else
+            {
+                image.sprite = template != null && template.sprite != null ?
+                    template.sprite : source != null ? source.sprite : null;
+                var label = new GameObject("Nome da ação", typeof(RectTransform),
+                    typeof(CanvasRenderer), typeof(Text));
+                RectTransform labelRect = (RectTransform)label.transform;
+                labelRect.SetParent(ghost, false);
+                labelRect.anchorMin = Vector2.zero;
+                labelRect.anchorMax = Vector2.one;
+                labelRect.offsetMin = new Vector2(8f, 8f);
+                labelRect.offsetMax = new Vector2(-8f, -8f);
+                Text text = label.GetComponent<Text>();
+                Text reference = templateCard != null ?
+                    templateCard.GetComponentInChildren<Text>(true) : null;
+                if (reference == null) reference = GetComponentInChildren<Text>(true);
+                if (reference != null) text.font = reference.font;
+                text.text = templateCard != null ? templateCard.DisplayName : repeated.ToString();
+                text.color = new Color(0.75f, 0.1f, 0.1f);
+                text.alignment = TextAnchor.MiddleCenter;
+                text.resizeTextForBestFit = true;
+                text.raycastTarget = false;
+            }
+        });
+        sequence.Append(ghost.DOPunchScale(Vector3.one * 0.19f, 0.25f, 5));
+        sequence.Append(shadeImage.DOFade(0f, 0.28f));
+        sequence.Join(ghost.DOAnchorPos(destination, 0.48f).SetEase(Ease.InOutCubic));
+        sequence.Join(ghost.DOScale(0.4f, 0.48f).SetEase(Ease.InCubic));
+        sequence.Join(ghost.DOLocalRotate(new Vector3(0f, 0f, -9f), 0.48f));
+        sequence.Append(ghostGroup.DOFade(0f, 0.17f));
+        sequence.OnComplete(() =>
+        {
+            if (originalGroup != null) originalGroup.alpha = 1f;
+            Destroy(ghostObject);
+            Destroy(shadeObject);
+            replayAnimating = false;
+            returning = false;
+            onFinished?.Invoke();
+        });
+    }
+
+    public void FadeOut(System.Action onFinished)
+    {
+        returning = true;
+        RectTransform rect = (RectTransform)transform;
+        rect.DOKill();
+        fadeGraphics = GetComponentsInChildren<Graphic>(true);
+        fadeColors = new Color[fadeGraphics.Length];
+        for (int i = 0; i < fadeGraphics.Length; i++)
+        {
+            fadeColors[i] = fadeGraphics[i].color;
+            fadeGraphics[i].DOFade(0f, 0.2f);
+        }
+        rect.DOScale(rect.localScale * 0.88f, 0.2f).SetEase(Ease.InSine)
+            .OnComplete(() =>
+            {
+                returning = false;
+                onFinished?.Invoke();
+            });
+    }
+
+    public void RestoreAppearance()
+    {
+        if (fadeGraphics == null) return;
+        for (int i = 0; i < fadeGraphics.Length; i++)
+            if (fadeGraphics[i] != null) fadeGraphics[i].color = fadeColors[i];
+    }
 
     public void ConfigureRuntime(Camera camera, DragCursorPreview cursorPreview)
     {
@@ -190,6 +344,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         }
         FollowDragPointer();
         UpdateHover(eventData.position);
+        transform.parent.GetComponentInChildren<ActivityCardAvailability>(true)?
+            .UpdateDucked(eventData.position, dragEventCamera);
     }
 
     private void FollowDragPointer()
@@ -216,15 +372,14 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         UpdateHover(eventData.position);
         WorkerAssignment target = hoveredWorker;
         ClearDrag();
-        int beforeAssignment = target != null ? target.AssignmentVersion : 0;
         if (target != null)
             target.TryAssign(activity, activityName, this);
-        bool accepted = target != null && target.AssignmentVersion != beforeAssignment;
         ActivityCardAvailability hand = transform.parent != null ?
             transform.parent.GetComponentInChildren<ActivityCardAvailability>(true) : null;
-        if (gameObject.activeInHierarchy && (hand == null || hand.ContainsCard(this)))
-            AnimateReturn(accepted && activity != ActivityKind.BuildHouse &&
-                activity != ActivityKind.BuildFence);
+        if (!replayAnimating && !returning && gameObject.activeInHierarchy &&
+            (hand == null || hand.ContainsCard(this)))
+            AnimateReturn();
+        hand?.EndExternalDrag();
     }
 
     public void CancelDrag()
@@ -234,7 +389,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         cancelled = true;
         dragCenterTween?.Kill();
         ClearDrag();
-        if (gameObject.activeInHierarchy) AnimateReturn(false);
+        if (gameObject.activeInHierarchy) AnimateReturn();
+        transform.parent.GetComponentInChildren<ActivityCardAvailability>(true)?.EndExternalDrag();
     }
 
     private void ClearDrag()
@@ -243,65 +399,18 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         hoveredWorker = null;
     }
 
-    private void AnimateReturn(bool used)
+    private void AnimateReturn()
     {
         returning = true;
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
-        Vector3 homeAngles = homeRotation.eulerAngles;
-        if (!used)
-        {
-            DOTween.Sequence().Append(rect.DOAnchorPos(originalPosition, 0.38f).SetEase(Ease.OutBack))
-                .Join(rect.DOScale(originalScale, 0.38f).SetEase(Ease.OutBack))
-                .Join(rect.DOLocalRotate(new Vector3(0f, 0f, homeAngles.z + 360f), 0.38f,
-                    RotateMode.FastBeyond360))
-                .OnComplete(() => RestoreDragSibling(rect));
-            return;
-        }
-
-        Graphic[] graphics = GetComponentsInChildren<Graphic>(true);
-        var colors = new Color[graphics.Length];
-        var originalMaterials = new Material[graphics.Length];
-        var dissolveMaterials = new Material[graphics.Length];
-        Shader dissolve = Shader.Find("UI/CardDissolve");
-        for (int i = 0; i < graphics.Length; i++)
-        {
-            colors[i] = graphics[i].color;
-            originalMaterials[i] = graphics[i].material;
-            if (dissolve != null)
-            {
-                Material material = new Material(dissolve);
-                dissolveMaterials[i] = material;
-                graphics[i].material = material;
-                material.DOFloat(1f, "_Cutoff", 0.2f);
-            }
-            else graphics[i].DOFade(0f, 0.18f);
-        }
-        DOTween.Sequence().Append(rect.DOScale(originalScale * 0.08f, 0.2f))
-            .Join(rect.DOLocalRotate(new Vector3(0f, 0f, homeAngles.z + 20f), 0.2f))
-            .OnComplete(() =>
-            {
-                if (rect == null) return;
-                rect.anchoredPosition = originalPosition + Vector2.down * 95f;
-                rect.localScale = originalScale * 0.55f;
-                rect.localRotation = Quaternion.Euler(0f, 0f, homeAngles.z - 8f);
-                for (int i = 0; i < graphics.Length; i++)
-                    if (graphics[i] != null)
-                    {
-                        graphics[i].material = originalMaterials[i];
-                        if (dissolveMaterials[i] != null) Destroy(dissolveMaterials[i]);
-                        graphics[i].color = new Color(colors[i].r, colors[i].g, colors[i].b, 0f);
-                        graphics[i].DOFade(colors[i].a, 0.32f);
-                    }
-                DOTween.Sequence().Append(rect.DOAnchorPos(originalPosition, 0.34f).SetEase(Ease.OutBack))
-                    .Join(rect.DOScale(originalScale, 0.34f).SetEase(Ease.OutBack))
-                    .Join(rect.DOLocalRotate(homeAngles, 0.34f))
-                    .OnComplete(() =>
-                    {
-                        RestoreDragSibling(rect);
-                        rect.DOPunchScale(Vector3.one * 0.08f, 0.22f, 1);
-                    });
-            });
+        Vector2 belowScreen = new Vector2(originalPosition.x,
+            -rect.rect.height * Mathf.Max(0.4f, originalScale.y) - 90f);
+        DOTween.Sequence().Append(rect.DOAnchorPos(belowScreen, 0.18f).SetEase(Ease.InCubic))
+            .AppendCallback(() => rect.localRotation = homeRotation)
+            .Append(rect.DOAnchorPos(originalPosition, 0.36f).SetEase(Ease.OutBack))
+            .Join(rect.DOScale(originalScale, 0.36f).SetEase(Ease.OutBack))
+            .OnComplete(() => RestoreDragSibling(rect));
     }
 
     private void RestoreDragSibling(RectTransform rect)

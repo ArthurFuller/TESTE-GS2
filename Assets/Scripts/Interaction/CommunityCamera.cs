@@ -35,6 +35,7 @@ public sealed class CommunityCamera : MonoBehaviour
     private float homeDistance;
     private bool manualActive;
     private bool followLocked;
+    private bool heldView;
     private readonly Vector2[] outerView = new Vector2[4];
     private readonly Vector2[] currentView = new Vector2[4];
 
@@ -80,6 +81,7 @@ public sealed class CommunityCamera : MonoBehaviour
         manualActive = false;
         followed = null;
         followLocked = false;
+        heldView = false;
         velocity = Vector3.zero;
         if (workerShot != null) workerShot.Priority.Value = 0;
         if (communityButton != null)
@@ -93,6 +95,7 @@ public sealed class CommunityCamera : MonoBehaviour
 
     private void Update()
     {
+        if (heldView) return;
         Keyboard keyboard = Keyboard.current;
         Vector2 movement = Vector2.zero;
         float zoom = 0f;
@@ -138,13 +141,15 @@ public sealed class CommunityCamera : MonoBehaviour
         if (!manualActive) return;
         Transform view = ViewTransform;
         Vector3 communityTarget = manualFocus - view.forward * manualDistance;
-        view.position = ClampPosition(Vector3.SmoothDamp(view.position,
-            communityTarget, ref velocity, smoothTime));
+        // O alvo já é limitado em Update. Limitar novamente cada passo do
+        // SmoothDamp causa um salto quando a área visível cresce no zoom out.
+        view.position = Vector3.SmoothDamp(view.position,
+            communityTarget, ref velocity, smoothTime);
     }
 
     public void Follow(Transform worker)
     {
-        if (worker == null || workerShot == null) return;
+        if (heldView || worker == null || workerShot == null) return;
         bool switchingWorker = followed != null;
         followed = worker;
         followLocked = false;
@@ -158,13 +163,24 @@ public sealed class CommunityCamera : MonoBehaviour
 
     public void ReturnToCommunity()
     {
-        if (followed == null || followLocked) return;
+        if (followed == null && !heldView || followLocked) return;
+        heldView = false;
         followed = null;
         manualActive = false;
         manualFocus = homeFocus;
         manualDistance = homeDistance;
         ViewTransform.position = homePosition;
         if (workerShot != null) workerShot.Priority.Value = 0;
+        if (communityButton != null) communityButton.gameObject.SetActive(false);
+    }
+
+    public void HoldCurrentView()
+    {
+        if (workerShot == null) return;
+        followed = null;
+        followLocked = false;
+        heldView = true;
+        workerShot.Priority.Value = 20;
         if (communityButton != null) communityButton.gameObject.SetActive(false);
     }
 

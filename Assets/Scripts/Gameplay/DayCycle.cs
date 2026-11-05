@@ -17,6 +17,7 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField] private SeedMerchant merchant;
     [SerializeField] private DeliveryMissionBoard missionBoard;
     [SerializeField] private DayEventController dayEvents;
+    [SerializeField] private ActivityCardAvailability hand;
     [SerializeField] private FeedingMinigame feedingGame;
     [SerializeField] private CardRewardChoice cardChoice;
     [SerializeField] private Text dayText;
@@ -78,7 +79,7 @@ public sealed class DayCycle : MonoBehaviour
             if (resourceHud == null) continue;
             ResourceKind kind = plot.Animal == AnimalKind.Cow ? ResourceKind.Milk : ResourceKind.Eggs;
             int amount = plot.Animal == AnimalKind.Cow ? milkPerCow : eggsPerChicken;
-            resourceHud.FlyFromWorld(kind, amount, plot.transform.position + Vector3.up);
+            resourceHud.FlyFromWorld(kind, amount, plot.transform.position + Vector3.up, 0.8f);
         }
     }
     public event Action DayChanged;
@@ -96,7 +97,7 @@ public sealed class DayCycle : MonoBehaviour
         UpdateMarket();
         if (dayEvents != null) dayEvents.StartDay(currentDay);
         if (actions != null) actions.BeginNextDay();
-        DayChanged?.Invoke();
+        OpenDayAfterEvent(false);
     }
 
     public void FinishDay()
@@ -117,7 +118,16 @@ public sealed class DayCycle : MonoBehaviour
         }
         feedingOpen = true;
         if (finishDayButton != null) finishDayButton.interactable = false;
-        feedingGame.Begin(workers, FinishFeeding);
+        if (hand != null) hand.ExitForDay(() => feedingGame.Begin(workers, FinishFeeding,
+            CancelFeeding));
+        else feedingGame.Begin(workers, FinishFeeding, CancelFeeding);
+    }
+
+    private void CancelFeeding()
+    {
+        feedingOpen = false;
+        if (finishDayButton != null) finishDayButton.interactable = true;
+        if (hand != null) hand.ReturnAfterCancelledDay();
     }
 
     private void FinishFeeding(SaleItem?[] chosenFood)
@@ -218,9 +228,23 @@ public sealed class DayCycle : MonoBehaviour
         feedback.ShowMessage("Dia " + currentDay + " de " + totalDays);
         if (finishDayButton != null) finishDayButton.interactable = true;
         UpdateDayLabel();
+        OpenDayAfterEvent(true);
+    }
+
+    private void OpenDayAfterEvent(bool addAnimalResources)
+    {
+        if (dayEvents != null && dayEvents.IsPanelOpen)
+        {
+            if (hand != null) hand.SuspendEntranceForEvent();
+            dayEvents.AfterEventCardClosed(() =>
+            {
+                DayChanged?.Invoke();
+                if (addAnimalResources) AddDailyAnimalResources();
+            });
+            return;
+        }
         DayChanged?.Invoke();
-        if (dayEvents != null) dayEvents.AfterEventCardClosed(AddDailyAnimalResources);
-        else AddDailyAnimalResources();
+        if (addAnimalResources) AddDailyAnimalResources();
     }
 
     private void UpdateMarket()

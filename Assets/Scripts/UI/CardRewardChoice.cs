@@ -231,7 +231,7 @@ public sealed class CardRewardChoice : MonoBehaviour
     private void Choose(int index)
     {
         if (completed == null || index < 0 || index >= 2 || offered[index] == null) return;
-        if (!hand.AddCard(offered[index].Kind)) return;
+        if (!hand.QueueRewardCard(offered[index].Kind)) return;
         chosenKinds.Add(offered[index].Kind);
         Hide();
         Action callback = completed;
