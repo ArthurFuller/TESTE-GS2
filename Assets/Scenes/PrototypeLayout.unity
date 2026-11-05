@@ -4735,7 +4735,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: 0.000000059604645, y: -79.13991}
+  m_AnchoredPosition: {x: 0.00000017882121, y: -79.139946}
   m_SizeDelta: {x: 472.71, y: 320}
   m_Pivot: {x: 0.5, y: 0}
 --- !u!1 &226304125
@@ -15657,7 +15657,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 4.700012, y: -47.5}
+  m_AnchoredPosition: {x: 4.699951, y: -47.5}
   m_SizeDelta: {x: 402.03, y: 160}
   m_Pivot: {x: 1, y: 1}
 --- !u!114 &610870232
@@ -30980,15 +30980,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 470d7dc4fae41974c8e43780911789a8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ResourceBank
-  startingWood: 99
-  startingFood: 99
-  startingCoins: 99
-  startingFish: 99
-  startingCorn: 99
-  startingPumpkin: 99
-  startingJerimum: 99
-  startingMilk: 99
-  startingEggs: 99
+  startingWood: 0
+  startingFood: 2
+  startingCoins: 3
+  startingFish: 0
+  startingCorn: 0
+  startingPumpkin: 0
+  startingJerimum: 0
+  startingMilk: 0
+  startingEggs: 0
   startingCornSeeds: 0
   startingPumpkinSeeds: 0
   startingJerimumSeeds: 0
