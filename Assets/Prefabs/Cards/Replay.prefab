@@ -91,7 +91,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ActivityCardDrag
   activityName: Replay
-  description: Repete a última carta de ação válida. Após Cafézinho, concede mais uma ação extra ao mesmo trabalhador.
+  description: A carta repete a última ação do funcionário.
   activity: 11
   worldCamera: {fileID: 0}
   preview: {fileID: 0}

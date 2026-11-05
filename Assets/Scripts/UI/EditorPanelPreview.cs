@@ -4,13 +4,16 @@ using UnityEngine;
 public sealed class EditorPanelPreview : MonoBehaviour
 {
     [SerializeField] private CanvasGroup group;
-    [SerializeField] private bool previewInEditor;
 
 #if UNITY_EDITOR
     private void OnEnable()
     {
         if (!Application.isPlaying)
+        {
+            UnityEditor.EditorApplication.hierarchyChanged -= ApplyPreview;
+            UnityEditor.EditorApplication.hierarchyChanged += ApplyPreview;
             UnityEditor.EditorApplication.delayCall += ApplyPreview;
+        }
     }
 
     private void OnValidate()
@@ -21,6 +24,7 @@ public sealed class EditorPanelPreview : MonoBehaviour
 
     private void OnDisable()
     {
+        UnityEditor.EditorApplication.hierarchyChanged -= ApplyPreview;
         UnityEditor.EditorApplication.delayCall -= ApplyPreview;
     }
 
@@ -28,7 +32,9 @@ public sealed class EditorPanelPreview : MonoBehaviour
     {
         if (this == null || Application.isPlaying) return;
         if (group == null) group = GetComponent<CanvasGroup>();
-        if (group != null) group.alpha = previewInEditor ? 1f : 0f;
+        if (group == null) return;
+        foreach (CanvasGroup panel in group.GetComponentsInChildren<CanvasGroup>(true))
+            if (panel.gameObject.activeSelf) panel.alpha = 1f;
     }
 #endif
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
@@ -6,6 +7,14 @@ public enum ResourceKind { Wood, Fish, Corn, Pumpkin, Jerimum, Food, Coins, Milk
 
 public sealed class ResourceHud : MonoBehaviour
 {
+    public sealed class DropBatch
+    {
+        internal readonly ResourceKind Kind;
+        internal readonly List<RectTransform> Icons = new();
+        internal bool Released;
+        internal DropBatch(ResourceKind kind) { Kind = kind; }
+    }
+
     [SerializeField] private ResourceBank resources;
     [SerializeField] private Text woodText;
     [SerializeField] private Text fishText;
@@ -90,6 +99,82 @@ public sealed class ResourceHud : MonoBehaviour
                 origin.TransformPoint(origin.rect.center)));
     }
 
+    public DropBatch CreateDropBatch(ResourceKind kind) => new DropBatch(kind);
+
+    public void DropOne(DropBatch batch, Vector3 worldOrigin)
+    {
+        if (batch == null || batch.Released || canvasRect == null) return;
+        Camera worldCamera = Camera.main;
+        Vector2 screen = worldCamera != null ?
+            (Vector2)worldCamera.WorldToScreenPoint(worldOrigin) :
+            new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+        Vector2 origin = CanvasPoint(screen);
+        int index = batch.Icons.Count;
+        var icon = new GameObject("Recurso dropado - " + batch.Kind,
+            typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        RectTransform rect = (RectTransform)icon.transform;
+        rect.SetParent(canvasRect, false);
+        rect.SetAsLastSibling();
+        rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = new Vector2(34f, 34f);
+        rect.anchoredPosition = origin;
+        rect.localScale = Vector3.zero;
+        Image image = icon.GetComponent<Image>();
+        image.sprite = SpriteFor(batch.Kind) ?? CircleSprite();
+        image.preserveAspect = true;
+        image.raycastTarget = false;
+        batch.Icons.Add(rect);
+        float angle = index * 2.39996f;
+        Vector2 landing = origin + new Vector2(Mathf.Cos(angle) * 18f,
+            -35f + Mathf.Sin(angle) * 7f);
+        rect.DOScale(1f, 0.2f).SetEase(Ease.OutBack).SetId(this);
+        rect.DOAnchorPos(landing, 0.28f).SetEase(Ease.OutBounce).SetId(this);
+    }
+
+    public void FlyDrops(DropBatch batch, System.Action onAllArrived = null)
+    {
+        if (batch == null || batch.Released || batch.Icons.Count == 0)
+        {
+            onAllArrived?.Invoke();
+            return;
+        }
+        batch.Released = true;
+        Text target = TargetFor(batch.Kind);
+        if (target == null)
+        {
+            foreach (RectTransform icon in batch.Icons)
+                if (icon != null) Destroy(icon.gameObject);
+            onAllArrived?.Invoke();
+            return;
+        }
+        int pending = batch.Icons.Count;
+        inFlight[(int)batch.Kind] += pending;
+        Refresh();
+        Vector2 destination = CanvasPoint(RectTransformUtility.WorldToScreenPoint(UiCamera,
+            target.rectTransform.TransformPoint(target.rectTransform.rect.center)));
+        for (int i = 0; i < batch.Icons.Count; i++)
+        {
+            RectTransform rect = batch.Icons[i];
+            if (rect == null)
+            {
+                if (--pending == 0) onAllArrived?.Invoke();
+                continue;
+            }
+            rect.DOKill();
+            Sequence flight = DOTween.Sequence().SetId(this);
+            flight.AppendInterval(i * iconInterval);
+            flight.Append(rect.DOAnchorPos(destination, flightDuration).SetEase(Ease.InCubic));
+            flight.Join(rect.DOScale(0.4f, flightDuration).SetEase(Ease.InQuad));
+            flight.OnComplete(() =>
+            {
+                inFlight[(int)batch.Kind] = Mathf.Max(0, inFlight[(int)batch.Kind] - 1);
+                Refresh();
+                if (--pending == 0) onAllArrived?.Invoke();
+            });
+            flight.OnKill(() => { if (rect != null) Destroy(rect.gameObject); });
+        }
+    }
+
     public void FlyFromScreen(ResourceKind kind, int amount, Vector2 screenOrigin,
         float pauseSeconds = 0f, System.Action onAllArrived = null)
     {
@@ -162,9 +247,6 @@ public sealed class ResourceHud : MonoBehaviour
             {
                 inFlight[(int)kind] = Mathf.Max(0, inFlight[(int)kind] - credited);
                 Refresh();
-                target.rectTransform.DOKill();
-                target.rectTransform.localScale = Vector3.one;
-                target.rectTransform.DOPunchScale(Vector3.one * 0.12f, 0.2f, 2);
                 onArrived?.Invoke();
             })
             .OnKill(() => { if (icon != null) Destroy(icon); });
@@ -226,12 +308,6 @@ public sealed class ResourceHud : MonoBehaviour
         }
         coinLossRemaining--;
         Refresh();
-        if (coinText != null)
-        {
-            coinText.rectTransform.DOKill();
-            coinText.rectTransform.localScale = Vector3.one;
-            coinText.rectTransform.DOPunchScale(Vector3.one * 0.06f, 0.13f, 2);
-        }
         coinLossTween = DOVirtual.DelayedCall(0.075f, StepCoinLoss).SetTarget(this);
     }
 

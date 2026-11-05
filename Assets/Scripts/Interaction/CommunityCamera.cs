@@ -24,6 +24,13 @@ public sealed class CommunityCamera : MonoBehaviour
     [SerializeField, Min(0.1f)] private float followDistance = 8.7f;
     [SerializeField, Min(0.01f)] private float smoothTime = 0.35f;
     [SerializeField, Min(0f)] private float farZoomPanRadius = 2f;
+    [Header("Impacto dos minigames")]
+    [SerializeField, Min(0f)] private float woodHitShake = 0.09f;
+    [SerializeField, Min(0f)] private float woodHitDuration = 0.16f;
+    [SerializeField, Min(0f)] private float fishingTensionShake = 0.035f;
+    [SerializeField, Min(0.1f)] private float shakeFrequency = 24f;
+    [SerializeField] private RectTransform[] shakeHudTargets;
+    [SerializeField, Min(0f)] private float hudShakeMultiplier = 18f;
 
     private Transform followed;
     private Vector3 manualFocus;
@@ -31,6 +38,11 @@ public sealed class CommunityCamera : MonoBehaviour
     private Vector3 homePosition;
     private Vector3 velocity;
     private Vector3 followVelocity;
+    private Vector3 followBasePosition;
+    private float hitShakeRemaining;
+    private bool fishingTension;
+    private float shakeClock;
+    private Vector2 lastHudOffset;
     private float manualDistance;
     private float homeDistance;
     private bool manualActive;
@@ -90,6 +102,7 @@ public sealed class CommunityCamera : MonoBehaviour
 
     private void OnDestroy()
     {
+        ApplyHudShake(Vector2.zero);
         if (communityButton != null) communityButton.onClick.RemoveListener(ReturnToCommunity);
     }
 
@@ -136,7 +149,21 @@ public sealed class CommunityCamera : MonoBehaviour
         {
             Transform shot = workerShot.transform;
             Vector3 target = followed.position - shot.forward * followDistance;
-            shot.position = Vector3.SmoothDamp(shot.position, target, ref followVelocity, smoothTime);
+            followBasePosition = Vector3.SmoothDamp(followBasePosition, target,
+                ref followVelocity, smoothTime);
+        }
+        if (workerShot != null && (followed != null || heldView))
+        {
+            float impact = woodHitDuration > 0f ?
+                woodHitShake * Mathf.Clamp01(hitShakeRemaining / woodHitDuration) : 0f;
+            float strength = impact + (fishingTension ? fishingTensionShake : 0f);
+            shakeClock += Time.deltaTime * shakeFrequency;
+            float x = Mathf.PerlinNoise(shakeClock, 0.3f) * 2f - 1f;
+            float y = Mathf.PerlinNoise(0.7f, shakeClock) * 2f - 1f;
+            workerShot.transform.position = followBasePosition +
+                (workerShot.transform.right * x + workerShot.transform.up * y) * strength;
+            ApplyHudShake(new Vector2(x, y) * (strength * hudShakeMultiplier));
+            hitShakeRemaining = Mathf.Max(0f, hitShakeRemaining - Time.deltaTime);
         }
         if (!manualActive) return;
         Transform view = ViewTransform;
@@ -156,6 +183,8 @@ public sealed class CommunityCamera : MonoBehaviour
         manualActive = false;
         if (!switchingWorker)
             workerShot.transform.position = worker.position - workerShot.transform.forward * followDistance;
+        followBasePosition = workerShot.transform.position;
+        StopMinigameShake();
         followVelocity = Vector3.zero;
         workerShot.Priority.Value = 20;
         if (communityButton != null) communityButton.gameObject.SetActive(true);
@@ -165,6 +194,7 @@ public sealed class CommunityCamera : MonoBehaviour
     {
         if (followed == null && !heldView || followLocked) return;
         heldView = false;
+        StopMinigameShake();
         followed = null;
         manualActive = false;
         manualFocus = homeFocus;
@@ -177,6 +207,8 @@ public sealed class CommunityCamera : MonoBehaviour
     public void HoldCurrentView()
     {
         if (workerShot == null) return;
+        StopMinigameShake();
+        workerShot.transform.position = followBasePosition;
         followed = null;
         followLocked = false;
         heldView = true;
@@ -189,6 +221,32 @@ public sealed class CommunityCamera : MonoBehaviour
         followLocked = locked;
         if (communityButton != null)
             communityButton.gameObject.SetActive(followed != null && !locked);
+    }
+
+    public void ShakeWoodHit()
+    {
+        hitShakeRemaining = woodHitDuration;
+    }
+
+    public void SetFishingTension(bool active)
+    {
+        fishingTension = active;
+    }
+
+    private void StopMinigameShake()
+    {
+        hitShakeRemaining = 0f;
+        fishingTension = false;
+        ApplyHudShake(Vector2.zero);
+    }
+
+    private void ApplyHudShake(Vector2 offset)
+    {
+        if (shakeHudTargets == null) return;
+        Vector2 delta = offset - lastHudOffset;
+        foreach (RectTransform target in shakeHudTargets)
+            if (target != null) target.anchoredPosition += delta;
+        lastHudOffset = offset;
     }
 
     private void ClampManualView()

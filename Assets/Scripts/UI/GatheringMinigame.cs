@@ -31,6 +31,9 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Min(0f)] private float fishingVerticalGap = 45f;
     [SerializeField, Min(0f)] private float hitPunchStrength = 0.08f;
     [SerializeField, Min(0f)] private float missShakeStrength = 14f;
+    [SerializeField, Min(0.05f)] private float fishDropPunchDuration = 0.23f;
+    [SerializeField, Min(0f)] private float fishDropPunchGap = 0.04f;
+    [SerializeField, Min(0f)] private float fishDropPunchStrength = 0.13f;
 
     private struct Layout
     {
@@ -55,10 +58,14 @@ public sealed class GatheringMinigame : MonoBehaviour
     }
 
     private Action<int> completed;
+    private Action woodHit;
+    private Action<bool> fishingTensionChanged;
+    private Action fishDropped;
     private RectTransform bar, panel, buttonRect, titleRect;
     private Text buttonText;
     private Layout panelLayout, barLayout, markerLayout, targetLayout, buttonLayout, titleLayout;
     private bool layoutCaptured, fishing, fishingPlus, resolving;
+    private bool fishingTensionStarted;
     private int round, hits;
     private float difficultyMultiplier, initialTargetWidth, previousTargetCenter;
     private float markerX, markerLimit, markerPivotOffset, markerDirection;
@@ -74,7 +81,9 @@ public sealed class GatheringMinigame : MonoBehaviour
         Hide();
     }
 
-    public void Begin(ActivityKind activity, Action<int> onCompleted, int fishingDifficulty = 0)
+    public void Begin(ActivityKind activity, Action<int> onCompleted, int fishingDifficulty = 0,
+        Action onWoodHit = null, Action<bool> onFishingTension = null,
+        Action onFishDropped = null)
     {
         if (!ResolveReferences())
         {
@@ -84,9 +93,13 @@ public sealed class GatheringMinigame : MonoBehaviour
         }
         RestoreLayout();
         completed = onCompleted;
+        woodHit = onWoodHit;
+        fishingTensionChanged = onFishingTension;
+        fishDropped = onFishDropped;
         fishing = activity == ActivityKind.Fish || activity == ActivityKind.FishPlus;
         fishingPlus = activity == ActivityKind.FishPlus;
         resolving = false;
+        fishingTensionStarted = false;
         round = hits = 0;
         difficultyMultiplier = fishing ? 1f + Mathf.Max(0, fishingDifficulty) * 0.4f : 1f;
         previousTargetCenter = float.NaN;
@@ -152,6 +165,7 @@ public sealed class GatheringMinigame : MonoBehaviour
             fishingProgress = Mathf.Max(0f, fishingProgress -
                 fishingDrainPerSecond * multiplier * struggle * Time.deltaTime);
             UpdateFishingFill();
+            CheckFishingTension();
             if (fishingProgress <= 0f || fishingElapsed >= fishingTimeLimit) FinishWithFeedback(0);
             return;
         }
@@ -175,6 +189,7 @@ public sealed class GatheringMinigame : MonoBehaviour
             fishingProgress = Mathf.Min(1f, fishingProgress + fishingClickGain /
                 (fishingPlus ? fishingPlusDifficulty : 1f));
             UpdateFishingFill();
+            CheckFishingTension();
             buttonRect.DOKill();
             buttonRect.localScale = Vector3.one;
             buttonRect.DOPunchScale(Vector3.one * 0.07f, 0.16f, 4);
@@ -188,6 +203,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (hit)
         {
             hits++;
+            woodHit?.Invoke();
             bar.DOKill();
             bar.anchoredPosition = barLayout.Position;
             bar.localScale = Vector3.one;
@@ -207,9 +223,37 @@ public sealed class GatheringMinigame : MonoBehaviour
     private void FinishWithFeedback(int rating)
     {
         resolving = true;
-        if (fishing && rating == 0)
-            bar.DOShakeAnchorPos(0.2f, missShakeStrength, 10, 90f, false, true);
-        DOVirtual.DelayedCall(0.23f, () => Complete(rating)).SetTarget(this);
+        fishingTensionStarted = false;
+        fishingTensionChanged?.Invoke(false);
+        if (!fishing)
+        {
+            DOVirtual.DelayedCall(0.23f, () => Complete(rating)).SetTarget(this);
+            return;
+        }
+        int fishCount = fishingPlus ? (rating > 0 ? 4 : 2) : (rating > 0 ? 2 : 1);
+        Sequence sequence = DOTween.Sequence().SetTarget(this);
+        panel.DOKill();
+        panel.localScale = Vector3.one;
+        if (rating == 0)
+            sequence.Append(bar.DOShakeAnchorPos(0.2f, missShakeStrength, 10, 90f, false, true));
+        for (int i = 0; i < fishCount; i++)
+        {
+            sequence.Append(panel.DOPunchScale(Vector3.one * fishDropPunchStrength,
+                fishDropPunchDuration, 2));
+            sequence.InsertCallback(sequence.Duration() - fishDropPunchDuration * 0.5f,
+                () => fishDropped?.Invoke());
+            if (i < fishCount - 1) sequence.AppendInterval(fishDropPunchGap);
+        }
+        sequence.AppendInterval(0.2f);
+        sequence.OnComplete(() => Complete(rating));
+    }
+
+    private void CheckFishingTension()
+    {
+        bool active = fishingProgress >= 2f / 3f;
+        if (active == fishingTensionStarted) return;
+        fishingTensionStarted = active;
+        fishingTensionChanged?.Invoke(active);
     }
 
     private void StartWoodRound()
@@ -277,9 +321,10 @@ public sealed class GatheringMinigame : MonoBehaviour
         }
         float height = Mathf.Max(220f, top - bottom);
         panel.anchorMin = panel.anchorMax = new Vector2(1f, 1f);
-        panel.pivot = new Vector2(1f, 1f);
+        panel.pivot = new Vector2(0.5f, 0.5f);
         panel.sizeDelta = new Vector2(fishingPanelWidth, height);
-        panel.anchoredPosition = new Vector2(right - parent.rect.xMax, top - parent.rect.yMax);
+        panel.anchoredPosition = new Vector2(right - parent.rect.xMax - fishingPanelWidth * 0.5f,
+            top - parent.rect.yMax - height * 0.5f);
         if (titleRect != null)
         {
             titleRect.sizeDelta = new Vector2(fishingPanelWidth - 20f, titleRect.sizeDelta.y);
@@ -305,6 +350,9 @@ public sealed class GatheringMinigame : MonoBehaviour
     {
         Action<int> callback = completed;
         completed = null;
+        woodHit = null;
+        fishingTensionChanged = null;
+        fishDropped = null;
         Hide();
         callback?.Invoke(rating);
     }

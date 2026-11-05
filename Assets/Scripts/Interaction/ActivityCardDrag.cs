@@ -37,6 +37,15 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private Graphic[] fadeGraphics;
     private Color[] fadeColors;
     private bool replayAnimating;
+    private WorkerAssignment deliveryWorker;
+    private Tween pendingFloat;
+    private Vector2 homePivot;
+    private float dragAngle;
+    private float angleVelocity;
+    private float horizontalSpeed;
+    private float lastPointerMove;
+    private Vector2 previousPointer;
+    private bool waitingForTarget;
 
     public ActivityKind Kind => activity;
     public string DisplayName => activityName;
@@ -173,6 +182,15 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         returning = true;
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
+        pendingFloat?.Kill();
+        if (deliveryWorker != null && !replayAnimating)
+        {
+            AnimateDelivery(rect, deliveryWorker, onFinished);
+            deliveryWorker = null;
+            waitingForTarget = false;
+            return;
+        }
+        deliveryWorker = null;
         fadeGraphics = GetComponentsInChildren<Graphic>(true);
         fadeColors = new Color[fadeGraphics.Length];
         for (int i = 0; i < fadeGraphics.Length; i++)
@@ -188,8 +206,88 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             });
     }
 
+    public void PrepareDelivery(WorkerAssignment worker)
+    {
+        deliveryWorker = worker;
+        pendingFloat?.Kill();
+    }
+
+    public void FlyToSelection()
+    {
+        RectTransform rect = (RectTransform)transform;
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas == null || rect.parent == null) return;
+        waitingForTarget = true;
+        returning = true;
+        rect.DOKill();
+        pendingFloat?.Kill();
+        rect.localRotation = homeRotation;
+        RectTransform parent = (RectTransform)rect.parent;
+        Vector2 screen = new Vector2(Screen.width * 0.17f, Screen.height * 0.82f);
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screen,
+                canvas.worldCamera, out Vector2 destination)) return;
+        rect.DOAnchorPos(destination, 0.42f).SetEase(Ease.OutCubic);
+        rect.DOScale(originalScale * 0.72f, 0.42f).SetEase(Ease.OutBack);
+        rect.DOLocalRotate(new Vector3(0f, 0f, -8f), 0.42f)
+            .OnComplete(() =>
+            {
+                if (!waitingForTarget) return;
+                pendingFloat = rect.DOAnchorPosY(destination.y + 7f, 1.3f)
+                    .SetEase(Ease.InOutSine).SetLoops(-1, LoopType.Yoyo);
+            });
+    }
+
+    public void ReturnFromSelection()
+    {
+        if (!waitingForTarget) return;
+        waitingForTarget = false;
+        pendingFloat?.Kill();
+        AnimateReturn();
+    }
+
+    private void AnimateDelivery(RectTransform rect, WorkerAssignment worker,
+        System.Action onFinished)
+    {
+        Canvas canvas = GetComponentInParent<Canvas>();
+        RectTransform parent = rect.parent as RectTransform;
+        if (canvas == null || parent == null || worldCamera == null || worker == null)
+        {
+            onFinished?.Invoke();
+            return;
+        }
+        Vector2 screen = worldCamera.WorldToScreenPoint(worker.transform.position + Vector3.up);
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screen,
+            canvas.worldCamera, out Vector2 destination);
+        Vector3 visualCenter = rect.TransformPoint(rect.rect.center);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.position += visualCenter - rect.TransformPoint(rect.rect.center);
+        float liftScale = Mathf.Max(rect.localScale.x, 0.1f) * 1.16f;
+        Sequence delivery = DOTween.Sequence();
+        delivery.Append(rect.DOAnchorPosY(rect.anchoredPosition.y + 28f, 0.18f)
+            .SetEase(Ease.OutCubic));
+        delivery.Join(rect.DOScale(liftScale, 0.18f)
+            .SetEase(Ease.OutCubic));
+        delivery.Append(rect.DOAnchorPos(destination, 0.47f).SetEase(Ease.InCubic));
+        delivery.Join(rect.DOLocalRotate(new Vector3(0f, 0f,
+            rect.localEulerAngles.z + 360f), 0.47f, RotateMode.FastBeyond360));
+        delivery.Join(rect.DOScale(originalScale * 0.04f, 0.47f).SetEase(Ease.InCubic));
+        CanvasGroup fadeGroup = GetComponent<CanvasGroup>();
+        if (fadeGroup == null) fadeGroup = gameObject.AddComponent<CanvasGroup>();
+        delivery.Append(rect.DOScale(originalScale * 0.14f, 0.08f)
+            .SetEase(Ease.OutBack));
+        delivery.Join(fadeGroup.DOFade(0f, 0.08f));
+        delivery.OnComplete(() =>
+        {
+            rect.pivot = homePivot;
+            returning = false;
+            onFinished?.Invoke();
+        });
+    }
+
     public void RestoreAppearance()
     {
+        CanvasGroup group = GetComponent<CanvasGroup>();
+        if (group != null) group.alpha = 1f;
         if (fadeGraphics == null) return;
         for (int i = 0; i < fadeGraphics.Length; i++)
             if (fadeGraphics[i] != null) fadeGraphics[i].color = fadeColors[i];
@@ -210,6 +308,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             shopClicking = false;
             transform.localScale = Vector3.one;
         }
+        homePivot = ((RectTransform)transform).pivot;
     }
 
     private void OnDisable()
@@ -217,6 +316,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         if (preview != null) preview.CancelRequested -= CancelDrag;
         shopClickTween?.Kill();
         shopHoverTween?.Kill();
+        pendingFloat?.Kill();
         if (activity == ActivityKind.BuySeeds)
         {
             shopClicking = false;
@@ -229,7 +329,21 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
 
     private void Update()
     {
-        if (dragging) FollowDragPointer();
+        if (!dragging) return;
+        FollowDragPointer();
+        float idle = Time.unscaledTime - lastPointerMove;
+        float targetAngle = Mathf.Clamp(-horizontalSpeed * 0.018f, -16f, 16f);
+        if (idle > 0.07f)
+        {
+            float elapsed = idle - 0.07f;
+            targetAngle = Mathf.Sin(elapsed * 10f) * Mathf.Exp(-elapsed * 3.5f) *
+                Mathf.Clamp(-horizontalSpeed * 0.018f, -9f, 9f);
+        }
+        if (hoveredWorker != null)
+            targetAngle = Mathf.Sin(Time.unscaledTime * 48f) * 5f;
+        dragAngle = Mathf.SmoothDampAngle(dragAngle, targetAngle, ref angleVelocity,
+            hoveredWorker != null ? 0.035f : 0.11f, Mathf.Infinity, Time.unscaledDeltaTime);
+        transform.localRotation = homeRotation * Quaternion.Euler(0f, 0f, dragAngle);
     }
 
     public void OnPointerEnter(PointerEventData eventData)
@@ -287,6 +401,13 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             return;
         }
         if (eventData.dragging || activity != ActivityKind.BuildHouse) return;
+        RestoreHover(true);
+        RectTransform clickedCard = (RectTransform)transform;
+        originalPosition = clickedCard.anchoredPosition;
+        originalScale = clickedCard.localScale;
+        homeRotation = clickedCard.localRotation;
+        homePivot = clickedCard.pivot;
+        dragSibling = clickedCard.GetSiblingIndex();
         WorkerAssignment worker = WorkerAssignment.Selected;
         if (worker != null) worker.TryAssign(activity, activityName, this);
     }
@@ -300,12 +421,27 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         originalPosition = rect.anchoredPosition;
         originalScale = rect.localScale;
         homeRotation = rect.localRotation;
+        homePivot = rect.pivot;
+        Vector3 cardCenter = rect.TransformPoint(rect.rect.center);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.position += cardCenter - rect.TransformPoint(rect.rect.center);
+        dragAngle = angleVelocity = horizontalSpeed = 0f;
+        previousPointer = eventData.position;
+        lastPointerMove = Time.unscaledTime;
         dragSibling = rect.GetSiblingIndex();
         ActivityCardAvailability hand = rect.parent != null ?
             rect.parent.GetComponentInChildren<ActivityCardAvailability>(true) : null;
         handBoundary = hand != null ? hand.DragBoundary : null;
         dragEventCamera = eventData.pressEventCamera;
         dragPointerScreen = eventData.position;
+        float pointerDelta = eventData.position.x - previousPointer.x;
+        if (Mathf.Abs(pointerDelta) > 0.5f)
+        {
+            horizontalSpeed = Mathf.Lerp(horizontalSpeed,
+                pointerDelta / Mathf.Max(Time.unscaledDeltaTime, 0.01f), 0.4f);
+            lastPointerMove = Time.unscaledTime;
+        }
+        previousPointer = eventData.position;
         dragCenterBlend = 0f;
         miniature = false;
         dragCenterTween?.Kill();
@@ -333,9 +469,6 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             RectTransform rect = (RectTransform)transform;
             rect.DOKill();
             rect.DOScale(originalScale * (outside ? 0.42f : 1f), 0.16f)
-                .SetEase(Ease.OutCubic);
-            float angle = homeRotation.eulerAngles.z + (outside ? -8f : 0f);
-            rect.DOLocalRotate(new Vector3(0f, 0f, angle), 0.16f)
                 .SetEase(Ease.OutCubic);
             dragCenterTween?.Kill();
             dragCenterTween = DOTween.To(() => dragCenterBlend,
@@ -368,6 +501,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         }
         OnDrag(eventData);
         dragging = false;
+        transform.localRotation = homeRotation * Quaternion.Euler(0f, 0f, dragAngle);
         dragCenterTween?.Kill();
         UpdateHover(eventData.position);
         WorkerAssignment target = hoveredWorker;
@@ -402,14 +536,20 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private void AnimateReturn()
     {
         returning = true;
+        waitingForTarget = false;
+        pendingFloat?.Kill();
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
+        Vector3 cardCenter = rect.TransformPoint(rect.rect.center);
+        rect.pivot = homePivot;
+        rect.position += cardCenter - rect.TransformPoint(rect.rect.center);
         Vector2 belowScreen = new Vector2(originalPosition.x,
             -rect.rect.height * Mathf.Max(0.4f, originalScale.y) - 90f);
         DOTween.Sequence().Append(rect.DOAnchorPos(belowScreen, 0.18f).SetEase(Ease.InCubic))
             .AppendCallback(() => rect.localRotation = homeRotation)
             .Append(rect.DOAnchorPos(originalPosition, 0.36f).SetEase(Ease.OutBack))
             .Join(rect.DOScale(originalScale, 0.36f).SetEase(Ease.OutBack))
+            .SetTarget(rect)
             .OnComplete(() => RestoreDragSibling(rect));
     }
 
