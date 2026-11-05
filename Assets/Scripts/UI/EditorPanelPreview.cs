@@ -34,7 +34,7 @@ public sealed class EditorPanelPreview : MonoBehaviour
         if (group == null) group = GetComponent<CanvasGroup>();
         if (group == null) return;
         foreach (CanvasGroup panel in group.GetComponentsInChildren<CanvasGroup>(true))
-            if (panel.gameObject.activeSelf) panel.alpha = 1f;
+            if (panel.gameObject.activeSelf && panel.alpha <= 0f) panel.alpha = 1f;
     }
 #endif
 }

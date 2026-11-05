@@ -42,7 +42,14 @@ public sealed class SeedMerchant : MonoBehaviour
         (secondHouseSite != null && !secondHouseSite.IsBuilt ? 1 : 0));
     private int housesPurchased;
 
-    private void Awake() => HideShop();
+    private void Awake()
+    {
+        if (shopGroup == null) return;
+        shopGroup.DOKill();
+        shopGroup.alpha = 0f;
+        shopGroup.blocksRaycasts = false;
+        shopGroup.interactable = false;
+    }
     public void ToggleShop()
     {
         if (!IsAvailable || dayCycle == null || !dayCycle.CanAcceptActions)

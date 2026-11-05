@@ -249,25 +249,46 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         System.Action onFinished)
     {
         Canvas canvas = GetComponentInParent<Canvas>();
-        RectTransform parent = rect.parent as RectTransform;
-        if (canvas == null || parent == null || worldCamera == null || worker == null)
+        RectTransform originalParent = rect.parent as RectTransform;
+        Camera destinationCamera = worldCamera != null ? worldCamera : Camera.main;
+        if (canvas == null || originalParent == null || destinationCamera == null || worker == null)
         {
             onFinished?.Invoke();
             return;
         }
-        Vector2 screen = worldCamera.WorldToScreenPoint(worker.transform.position + Vector3.up);
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screen,
-            canvas.worldCamera, out Vector2 destination);
+        bool fromSelection = waitingForTarget;
         Vector3 visualCenter = rect.TransformPoint(rect.rect.center);
+        Vector2 originalAnchorMin = rect.anchorMin;
+        Vector2 originalAnchorMax = rect.anchorMax;
+        RectTransform flightParent = originalParent;
+        if (fromSelection && canvas.rootCanvas.transform is RectTransform root)
+        {
+            rect.SetParent(root, true);
+            rect.SetAsLastSibling();
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            flightParent = root;
+        }
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.position += visualCenter - rect.TransformPoint(rect.rect.center);
         float liftScale = Mathf.Max(rect.localScale.x, 0.1f) * 1.16f;
-        Sequence delivery = DOTween.Sequence();
+        Vector2 flightStart = rect.anchoredPosition;
+        float flightProgress = 0f;
+        Sequence delivery = DOTween.Sequence().SetTarget(rect);
         delivery.Append(rect.DOAnchorPosY(rect.anchoredPosition.y + 28f, 0.18f)
             .SetEase(Ease.OutCubic));
         delivery.Join(rect.DOScale(liftScale, 0.18f)
             .SetEase(Ease.OutCubic));
-        delivery.Append(rect.DOAnchorPos(destination, 0.47f).SetEase(Ease.InCubic));
+        delivery.AppendCallback(() => flightStart = rect.anchoredPosition);
+        delivery.Append(DOTween.To(() => flightProgress, progress =>
+        {
+            flightProgress = progress;
+            if (worker == null || rect == null) return;
+            Vector2 screen = destinationCamera.WorldToScreenPoint(
+                worker.transform.position + Vector3.up);
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(flightParent,
+                    screen, canvas.worldCamera, out Vector2 destination))
+                rect.anchoredPosition = Vector2.LerpUnclamped(flightStart, destination, progress);
+        }, 1f, 0.47f).SetEase(Ease.InCubic));
         delivery.Join(rect.DOLocalRotate(new Vector3(0f, 0f,
             rect.localEulerAngles.z + 360f), 0.47f, RotateMode.FastBeyond360));
         delivery.Join(rect.DOScale(originalScale * 0.04f, 0.47f).SetEase(Ease.InCubic));
@@ -278,6 +299,12 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         delivery.Join(fadeGroup.DOFade(0f, 0.08f));
         delivery.OnComplete(() =>
         {
+            if (fromSelection && rect != null && originalParent != null)
+            {
+                rect.SetParent(originalParent, false);
+                rect.anchorMin = originalAnchorMin;
+                rect.anchorMax = originalAnchorMax;
+            }
             rect.pivot = homePivot;
             returning = false;
             onFinished?.Invoke();

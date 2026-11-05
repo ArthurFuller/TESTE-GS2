@@ -18,6 +18,7 @@ public sealed class FeedingMinigame : MonoBehaviour
     [SerializeField] private Sprite cornSprite;
     [SerializeField] private Sprite cassavaSprite;
     [SerializeField] private Sprite jerimumSprite;
+    [SerializeField] private Sprite milkSprite;
     [SerializeField] private Sprite eggSprite;
     [SerializeField] private Button finishButton;
     [SerializeField] private Button backButton;
@@ -229,6 +230,7 @@ public sealed class FeedingMinigame : MonoBehaviour
         SaleItem.Corn => cornSprite,
         SaleItem.Pumpkin => cassavaSprite,
         SaleItem.Jerimum => jerimumSprite,
+        SaleItem.Milk => milkSprite,
         SaleItem.Eggs => eggSprite,
         _ => null
     };

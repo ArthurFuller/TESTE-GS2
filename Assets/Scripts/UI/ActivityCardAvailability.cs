@@ -716,8 +716,11 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (index >= 0)
         {
             MoveNeighbours(index, false, immediate);
-            Vector2 position = CardPosition(index);
-            AnimateCard(rect, position, normalScale, CardAngle(position.x), immediate);
+            if (!hovered.IsReturning)
+            {
+                Vector2 position = CardPosition(index);
+                AnimateCard(rect, position, normalScale, CardAngle(position.x), immediate);
+            }
         }
         hovered = null;
         OrderCards();

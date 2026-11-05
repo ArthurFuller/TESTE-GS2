@@ -32,6 +32,8 @@ public sealed class ResourceHud : MonoBehaviour
     [SerializeField] private Sprite pumpkinSprite;
     [SerializeField] private Sprite jerimumSprite;
     [SerializeField] private Sprite foodSprite;
+    [SerializeField] private Sprite coinSprite;
+    [SerializeField] private Sprite milkSprite;
     [SerializeField] private Sprite eggSprite;
     [SerializeField, Min(1)] private int maximumFlyingIcons = 64;
     [SerializeField, Min(0.1f)] private float flightDuration = 0.55f;
@@ -260,6 +262,8 @@ public sealed class ResourceHud : MonoBehaviour
         ResourceKind.Pumpkin => pumpkinSprite,
         ResourceKind.Jerimum => jerimumSprite,
         ResourceKind.Food => foodSprite,
+        ResourceKind.Coins => coinSprite,
+        ResourceKind.Milk => milkSprite,
         ResourceKind.Eggs => eggSprite,
         _ => null
     };
@@ -332,11 +336,11 @@ public sealed class ResourceHud : MonoBehaviour
         if (cassavaText != null) cassavaText.text = Shown(ResourceKind.Pumpkin, resources.Pumpkin).ToString();
         if (pumpkinText != null) pumpkinText.text = Shown(ResourceKind.Jerimum, resources.Jerimum).ToString();
         if (cornText != null) cornText.text = Shown(ResourceKind.Corn, resources.Corn).ToString();
-        if (foodText != null) foodText.text = "Comida: " + Shown(ResourceKind.Food, resources.Food);
-        if (coinText != null) coinText.text = "Dinheiro: " +
-            Mathf.Max(0, Shown(ResourceKind.Coins, resources.Coins) + coinLossRemaining);
-        if (animalText != null) animalText.text = "Leite: " + Shown(ResourceKind.Milk, resources.Milk) +
-            (eggText == null ? "     Ovos: " + Shown(ResourceKind.Eggs, resources.Eggs) : "");
+        if (foodText != null) foodText.text = Shown(ResourceKind.Food, resources.Food).ToString();
+        if (coinText != null) coinText.text =
+            Mathf.Max(0, Shown(ResourceKind.Coins, resources.Coins) + coinLossRemaining).ToString();
+        if (animalText != null) animalText.text = Shown(ResourceKind.Milk, resources.Milk) +
+            (eggText == null ? "  Ovos: " + Shown(ResourceKind.Eggs, resources.Eggs) : "");
         if (eggText != null) eggText.text = Shown(ResourceKind.Eggs, resources.Eggs).ToString();
     }
 }
