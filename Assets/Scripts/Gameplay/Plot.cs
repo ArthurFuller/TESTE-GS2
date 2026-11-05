@@ -21,6 +21,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     [SerializeField, Min(0.01f)] private float fencePieceDuration = 0.28f;
     [SerializeField] private Transform growthFill;
     [SerializeField, Min(0.01f)] private float growthFillWidth = 0.84f;
+    [SerializeField] private Color readyGrowthColor = new Color(0.16f, 0.75f, 0.2f);
 
     public bool IsPlowed { get; private set; }
     public bool IsFenced { get; private set; }
@@ -40,6 +41,9 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     private Material selectionMaterial;
     private bool pointerOver;
     private Transform animalVisual;
+    private Renderer growthFillRenderer;
+    private Color growingFillColor;
+    private MaterialPropertyBlock growthFillBlock;
     private static readonly List<Plot> allPlots = new List<Plot>();
     private static readonly Dictionary<string, JoinedVisual> joinedVisuals =
         new Dictionary<string, JoinedVisual>();
@@ -49,6 +53,12 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     private void Awake()
     {
+        if (growthFill != null)
+        {
+            growthFillRenderer = growthFill.GetComponent<Renderer>();
+            if (growthFillRenderer != null && growthFillRenderer.sharedMaterial != null)
+                growingFillColor = growthFillRenderer.sharedMaterial.color;
+        }
         if (surfaceRenderer != null)
         {
             surfaceBounds = surfaceRenderer.bounds;
@@ -130,6 +140,13 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         }
         foreach (JoinedVisual joined in joinedVisuals.Values)
             joined.SetHighlight(joined.AllCanUse(activity, currentDay, catalog));
+    }
+
+    public static bool HasAvailable(ActivityKind activity, int currentDay, SeedCatalog catalog)
+    {
+        foreach (Plot plot in allPlots)
+            if (plot != null && plot.CanUse(activity, currentDay, catalog)) return true;
+        return false;
     }
 
     public static void ClearHighlights()
@@ -244,6 +261,35 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
             age <= settings.growthDays + settings.witherDaysAfterMaturity;
     }
 
+    public List<Plot> ReadyConnectedPlots(int currentDay, SeedCatalog catalog)
+    {
+        var ready = new List<Plot>();
+        if (IsReady(currentDay, catalog)) ready.Add(this);
+        if (joinedVisual == null) return ready;
+
+        var remaining = new List<Plot>();
+        foreach (Plot member in joinedVisual.Members)
+            if (member != null && member != this && member.IsReady(currentDay, catalog))
+                remaining.Add(member);
+        Plot previous = this;
+        while (remaining.Count > 0)
+        {
+            int nearest = 0;
+            float distance = float.PositiveInfinity;
+            for (int i = 0; i < remaining.Count; i++)
+            {
+                float candidate = (remaining[i].transform.position - previous.transform.position).sqrMagnitude;
+                if (candidate >= distance) continue;
+                distance = candidate;
+                nearest = i;
+            }
+            previous = remaining[nearest];
+            ready.Add(previous);
+            remaining.RemoveAt(nearest);
+        }
+        return ready;
+    }
+
     public int HarvestYield(int currentDay, SeedCatalog catalog)
     {
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
@@ -273,6 +319,16 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         }
         if (growthFill != null)
         {
+            if (growthFillRenderer != null)
+            {
+                growthFillBlock ??= new MaterialPropertyBlock();
+                growthFillRenderer.GetPropertyBlock(growthFillBlock);
+                Color fillColor = IsReady(currentDay, catalog) ?
+                    readyGrowthColor : growingFillColor;
+                growthFillBlock.SetColor("_Color", fillColor);
+                growthFillBlock.SetColor("_BaseColor", fillColor);
+                growthFillRenderer.SetPropertyBlock(growthFillBlock);
+            }
             float width = Mathf.Max(0.001f, growthFillWidth * progress);
             Vector3 size = growthFill.localScale;
             growthFill.localScale = new Vector3(width, size.y, size.z);
@@ -608,6 +664,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     private sealed class JoinedVisual
     {
         private readonly List<Plot> members;
+        public IReadOnlyList<Plot> Members => members;
         private readonly GameObject root;
         private readonly Mesh surfaceMesh;
         private readonly Mesh outlineMesh;

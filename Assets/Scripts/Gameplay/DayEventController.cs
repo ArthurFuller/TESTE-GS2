@@ -23,14 +23,27 @@ public sealed class DayEventController : MonoBehaviour
     [SerializeField, Min(0)] private int rainGrowthBonus = 1;
     [SerializeField, Min(1)] private int forestExploitationThreshold = 6;
     [SerializeField, Range(0f, 1f)] private float comadreChance = 0.5f;
-    [SerializeField, Min(1)] private int comadreAbsenceDays = 2;
+    [SerializeField, Min(1)] private int comadreAbsenceDays = 1;
     [SerializeField, Min(0)] private int rainForestRecovery = 2;
 
     private SertaoEventKind activeGeneralEvent;
     private int generalDaysRemaining;
     private int forestExploitation;
+    private readonly Dictionary<int, (string Title, Sprite Art)> announcedEvents = new();
 
     public bool IsPanelOpen => card != null && card.IsOpen;
+    public bool TryGetEvent(int day, out string title, out Sprite art)
+    {
+        if (announcedEvents.TryGetValue(day, out var record))
+        {
+            title = record.Title;
+            art = record.Art;
+            return true;
+        }
+        title = null;
+        art = null;
+        return false;
+    }
 
     public void AfterEventCardClosed(System.Action action)
     {
@@ -97,6 +110,8 @@ public sealed class DayEventController : MonoBehaviour
         }
         if (announced == SertaoEventKind.None && activeGeneralEvent == SertaoEventKind.None)
             announced = SertaoEventKind.Calm;
+        if (announced != SertaoEventKind.None)
+            announcedEvents[day] = (Title(announced), Art(announced));
         if (announced != SertaoEventKind.None && card != null)
             card.Show(Title(announced), Description(announced), Art(announced));
     }

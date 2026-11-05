@@ -8,6 +8,9 @@ public sealed class DayTimeline : MonoBehaviour
 {
     [SerializeField] private DayCycle days;
     [SerializeField] private ActionResolver actions;
+    [SerializeField] private DayEventController dayEvents;
+    [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
+    [SerializeField] private SeedMerchant merchant;
     [SerializeField] private RectTransform topBar;
     [SerializeField] private RectTransform missionsButton;
     [SerializeField] private Font font;
@@ -25,6 +28,9 @@ public sealed class DayTimeline : MonoBehaviour
     [SerializeField, Min(65f)] private float cardHeight = 83f;
     [SerializeField, Min(0f)] private float cardGap = 10f;
     [SerializeField, Min(1f)] private float cardLineHeight = 3f;
+    [SerializeField, Min(0f)] private float cardStartX = 18f;
+    [SerializeField, Min(0f)] private float cardTopInset = 8f;
+    [SerializeField] private float cardLineOffsetY;
     [Header("Animação")]
     [SerializeField, Min(0.05f)] private float slideDuration = 0.36f;
     [SerializeField, Min(0f)] private float waveDelay = 0.055f;
@@ -51,6 +57,8 @@ public sealed class DayTimeline : MonoBehaviour
     private CanvasGroup panelGroup;
     private readonly List<RectTransform> dayNodes = new();
     private readonly List<RectTransform> dayLines = new();
+    private readonly List<RectTransform> cardNodes = new();
+    private readonly List<RectTransform> cardLines = new();
     private readonly Dictionary<RectTransform, float> dayHomeY = new();
     private Vector2 daysPanelSize;
     private Vector2 panelHomePosition;
@@ -73,6 +81,7 @@ public sealed class DayTimeline : MonoBehaviour
             return;
         }
 #endif
+        if (dayEvents == null) dayEvents = FindFirstObjectByType<DayEventController>();
         if (actions != null) actions.CardPlayed += Record;
         if (days != null) days.DayChanged += RefreshDays;
         EnsureUI();
@@ -83,6 +92,7 @@ public sealed class DayTimeline : MonoBehaviour
     {
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.delayCall -= RefreshEditor;
+        UnityEditor.EditorApplication.delayCall -= RefreshInspector;
 #endif
         if (actions != null) actions.CardPlayed -= Record;
         if (days != null) days.DayChanged -= RefreshDays;
@@ -93,8 +103,21 @@ public sealed class DayTimeline : MonoBehaviour
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        UnityEditor.EditorApplication.delayCall -= RefreshEditor;
-        UnityEditor.EditorApplication.delayCall += RefreshEditor;
+        UnityEditor.EditorApplication.delayCall -= RefreshInspector;
+        UnityEditor.EditorApplication.delayCall += RefreshInspector;
+    }
+
+    private void RefreshInspector()
+    {
+        if (this == null) return;
+        if (!Application.isPlaying)
+        {
+            RefreshEditor();
+            return;
+        }
+        if (open && viewedDay > 0 && cardScroll != null &&
+            cardScroll.gameObject.activeInHierarchy)
+            RenderCards(viewedDay, false);
     }
 
     private void RefreshEditor()
@@ -414,15 +437,24 @@ public sealed class DayTimeline : MonoBehaviour
         else Open();
     }
 
+    public void ClosePanel()
+    {
+        if (open) Close();
+    }
+
     private void Open()
     {
         if (days != null && !days.CanAcceptActions) return;
+        if (activeMissionsPanel != null) activeMissionsPanel.Close();
+        if (merchant != null && merchant.IsOpen) merchant.HideShop();
         EnsureUI();
         open = true;
         viewedDay = 0;
         dayRow.gameObject.SetActive(true);
         cardScroll.gameObject.SetActive(false);
+        scroll.enabled = true;
         backButton.gameObject.SetActive(false);
+        backButton.interactable = true;
         title.text = "LINHA DO TEMPO";
         RefreshDays();
         dayScroll.horizontalNormalizedPosition = 0f;
@@ -441,6 +473,7 @@ public sealed class DayTimeline : MonoBehaviour
         open = false;
         DOTween.Kill(this);
         panel.DOKill();
+        scroll.enabled = true;
         panelGroup.interactable = panelGroup.blocksRaycasts = false;
         panel.DOAnchorPosY(panelHomePosition.y + panel.rect.height, slideDuration)
             .SetEase(Ease.InCubic).OnComplete(() => panelGroup.alpha = 0f);
@@ -455,6 +488,7 @@ public sealed class DayTimeline : MonoBehaviour
         panelGroup.interactable = panelGroup.blocksRaycasts = false;
         panel.anchoredPosition = panelHomePosition + Vector2.up * daysPanelSize.y;
         cardScroll.gameObject.SetActive(false);
+        scroll.enabled = true;
         backButton.gameObject.SetActive(false);
     }
 
@@ -473,6 +507,7 @@ public sealed class DayTimeline : MonoBehaviour
             if (!open || viewedDay != day) return;
             dayRow.gameObject.SetActive(false);
             backButton.gameObject.SetActive(true);
+            backButton.interactable = false;
             cardScroll.gameObject.SetActive(false);
             Clear(cardContent);
             panel.DOSizeDelta(new Vector2(daysPanelSize.x, panelClip.rect.height), slideDuration)
@@ -481,34 +516,77 @@ public sealed class DayTimeline : MonoBehaviour
                     if (!open || viewedDay != day) return;
                     cardScroll.gameObject.SetActive(true);
                     RenderCards(day, true);
+                    backButton.interactable = true;
                 });
         }).SetTarget(this);
     }
 
     private void BackToDays()
     {
+        if (viewedDay == 0 || !cardScroll.gameObject.activeSelf) return;
         viewedDay = 0;
-        cardScroll.gameObject.SetActive(false);
-        backButton.gameObject.SetActive(false);
-        panel.DOSizeDelta(daysPanelSize, slideDuration)
-            .SetEase(Ease.OutCubic).OnComplete(() =>
-            {
-                dayRow.gameObject.SetActive(true);
-                RefreshDays();
-                PlaceDaysAbove();
-                AnimateDays(true);
-            });
-        title.text = "LINHA DO TEMPO";
+        backButton.interactable = false;
+        scroll.enabled = false;
+        AnimateCardsOut();
+        float end = Mathf.Max(0, cardNodes.Count - 1) * waveDelay +
+            slideDuration * 0.65f;
+        DOVirtual.DelayedCall(end, () =>
+        {
+            if (!open || viewedDay != 0) return;
+            cardScroll.gameObject.SetActive(false);
+            scroll.enabled = true;
+            backButton.gameObject.SetActive(false);
+            title.text = "LINHA DO TEMPO";
+            panel.DOKill();
+            panel.DOSizeDelta(daysPanelSize, slideDuration)
+                .SetEase(Ease.OutCubic).OnComplete(() =>
+                {
+                    if (!open || viewedDay != 0) return;
+                    dayRow.gameObject.SetActive(true);
+                    RefreshDays();
+                    PlaceDaysAbove();
+                    AnimateDays(true);
+                    backButton.interactable = true;
+                });
+        }).SetTarget(this);
+    }
+
+    private void AnimateCardsOut()
+    {
+        float exitY = cardHeight + cardTopInset + 4f;
+        float duration = slideDuration * 0.65f;
+        for (int i = 0; i < cardNodes.Count; i++)
+        {
+            RectTransform card = cardNodes[i];
+            if (card == null) continue;
+            card.DOKill();
+            card.DOAnchorPosY(exitY, duration).SetDelay(i * waveDelay)
+                .SetEase(Ease.InCubic);
+        }
+        for (int i = 0; i < cardLines.Count; i++)
+        {
+            RectTransform line = cardLines[i];
+            if (line == null) continue;
+            line.DOKill();
+            line.DOAnchorPosY(exitY, duration).SetDelay((i + 0.5f) * waveDelay)
+                .SetEase(Ease.InCubic);
+        }
     }
 
     private void RenderCards(int day, bool animate)
     {
         Clear(cardContent);
-        history.TryGetValue(day, out List<PlayedCard> cards);
-        int count = cards != null ? cards.Count : 0;
+        cardNodes.Clear();
+        cardLines.Clear();
+        var cards = new List<PlayedCard>();
+        if (history.TryGetValue(day, out List<PlayedCard> played)) cards.AddRange(played);
+        if (dayEvents != null && dayEvents.TryGetEvent(day, out string eventName,
+                out Sprite eventArt))
+            cards.Insert(0, new PlayedCard { Name = eventName, Art = eventArt });
+        int count = cards.Count;
         float stride = cardWidth + cardGap;
         float width = Mathf.Max(scroll.viewport.rect.width,
-            count * stride + 30f);
+            count * stride + cardStartX * 2f);
         cardContent.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
         scroll.horizontalNormalizedPosition = 0f;
         if (count == 0)
@@ -519,9 +597,12 @@ public sealed class DayTimeline : MonoBehaviour
             empty.pivot = new Vector2(0f, 1f);
             empty.anchoredPosition = new Vector2(18f, -40f);
             empty.sizeDelta = new Vector2(width - 36f, 40f);
+            cardNodes.Add(empty);
             return;
         }
-        float lineY = -8f - cardHeight * 0.5f;
+        float cardY = -cardTopInset;
+        float lineY = cardY - cardHeight * 0.5f + cardLineOffsetY;
+        float entryY = cardHeight + cardTopInset + 4f;
         for (int i = 0; i < count - 1; i++)
         {
             RectTransform line = Box("Ligação da carta " + (i + 1), cardContent,
@@ -529,8 +610,9 @@ public sealed class DayTimeline : MonoBehaviour
             line.anchorMin = line.anchorMax = new Vector2(0f, 1f);
             line.pivot = new Vector2(0f, 0.5f);
             line.sizeDelta = new Vector2(stride, cardLineHeight);
-            line.anchoredPosition = new Vector2(18f + cardWidth * 0.5f + i * stride,
-                animate ? cardHeight + 12f : lineY);
+            line.anchoredPosition = new Vector2(cardStartX + cardWidth * 0.5f + i * stride,
+                animate ? entryY : lineY);
+            cardLines.Add(line);
             if (animate)
                 line.DOAnchorPosY(lineY, slideDuration)
                     .SetDelay((i + 0.5f) * waveDelay).SetEase(Ease.OutCubic);
@@ -543,8 +625,9 @@ public sealed class DayTimeline : MonoBehaviour
             card.anchorMin = card.anchorMax = new Vector2(0f, 1f);
             card.pivot = new Vector2(0.5f, 1f);
             card.sizeDelta = new Vector2(cardWidth, cardHeight);
-            float x = 18f + cardWidth * 0.5f + i * stride;
-            card.anchoredPosition = new Vector2(x, animate ? cardHeight + 12f : -8f);
+            float x = cardStartX + cardWidth * 0.5f + i * stride;
+            card.anchoredPosition = new Vector2(x, animate ? entryY : cardY);
+            cardNodes.Add(card);
             Image art = card.GetComponent<Image>();
             art.sprite = data.Art;
             art.preserveAspect = true;
@@ -554,7 +637,7 @@ public sealed class DayTimeline : MonoBehaviour
                 Label(data.Name, card, 9, new Color(0.55f, 0.1f, 0.1f));
             }
             if (animate)
-                card.DOAnchorPosY(-8f, slideDuration).SetDelay(i * waveDelay)
+                card.DOAnchorPosY(cardY, slideDuration).SetDelay(i * waveDelay)
                     .SetEase(Ease.OutBack);
         }
     }
@@ -606,6 +689,7 @@ public sealed class DayTimeline : MonoBehaviour
         for (int i = parent.childCount - 1; i >= 0; i--)
         {
             GameObject child = parent.GetChild(i).gameObject;
+            child.transform.DOKill();
             child.SetActive(false);
             child.transform.SetParent(null, false);
             if (Application.isPlaying) Destroy(child);

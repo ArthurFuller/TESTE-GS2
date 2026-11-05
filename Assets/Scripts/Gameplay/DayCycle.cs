@@ -15,6 +15,8 @@ public sealed class DayCycle : MonoBehaviour
     [SerializeField] private Plot[] plots;
     [SerializeField] private SeedCatalog seedCatalog;
     [SerializeField] private SeedMerchant merchant;
+    [SerializeField] private DayTimeline timeline;
+    [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
     [SerializeField] private DeliveryMissionBoard missionBoard;
     [SerializeField] private DayEventController dayEvents;
     [SerializeField] private ActivityCardAvailability hand;
@@ -34,6 +36,13 @@ public sealed class DayCycle : MonoBehaviour
     private bool gameOver;
     private int todayMilk;
     private int todayEggs;
+    private int lastSummarizedDay;
+    private int totalWoodGained;
+    private int totalFishGained;
+    private int totalFoodGained;
+    private int totalCropsStored;
+    private int totalPlotsPlowed;
+    private int totalCropsHarvested;
 
     public bool CanAcceptActions => !summaryOpen && !feedingOpen && !gameOver &&
         (dayEvents == null || !dayEvents.IsPanelOpen);
@@ -102,15 +111,32 @@ public sealed class DayCycle : MonoBehaviour
 
     public void FinishDay()
     {
+        if (finishDayButton != null &&
+            finishDayButton.GetComponent<HoverPunchButton>()?.BlocksNewClicks == true) return;
         if (!CanAcceptActions || resources == null || actions == null)
             return;
         if (actions.IsBusy)
         {
+            if (finishDayButton != null)
+                finishDayButton.GetComponent<HoverPunchButton>()?.ShakeRejected();
             feedback.ShowMessage(actions.GatheringNeedsPlayer ?
-                "Inicie a coleta pendente pelo botão do trabalhador." : "Aguarde o fim das ações.");
+                "Inicie a coleta pendente pelo botão do trabalhador." :
+                actions.HasPendingSelection ? "Escolha um terreno ou cancele a carta ativa." :
+                "Aguarde o fim das ações.");
             return;
         }
 
+        if (timeline != null) timeline.ClosePanel();
+        if (activeMissionsPanel != null) activeMissionsPanel.Close();
+        if (merchant != null && merchant.IsOpen) merchant.HideShop();
+        if (currentDay >= totalDays)
+        {
+            feedingOpen = true;
+            if (finishDayButton != null) finishDayButton.interactable = false;
+            if (hand != null) hand.ExitForDay(() => ShowDaySummary(0, 0, 0, 0));
+            else ShowDaySummary(0, 0, 0, 0);
+            return;
+        }
         if (feedingGame == null)
         {
             feedback.ShowMessage("Minigame de alimentação não configurado.");
@@ -173,12 +199,30 @@ public sealed class DayCycle : MonoBehaviour
 
     private void ShowDaySummary(int prepared, int raw, int unfed, int absent)
     {
+        if (lastSummarizedDay != currentDay)
+        {
+            totalWoodGained += actions.WoodGainedToday;
+            totalFishGained += actions.FishGainedToday;
+            totalFoodGained += actions.FoodGainedToday;
+            totalCropsStored += actions.CropsStoredToday;
+            totalPlotsPlowed += actions.PlotsPlowedToday;
+            totalCropsHarvested += actions.CropsHarvestedToday;
+            lastSummarizedDay = currentDay;
+        }
         feedingOpen = false;
         summaryOpen = true;
         gameOver = currentDay >= totalDays;
         if (finishDayButton != null) finishDayButton.interactable = false;
         if (continueButton != null) continueButton.interactable = !gameOver;
         if (gameOver && continueButtonText != null) continueButtonText.text = "PARTIDA ENCERRADA";
+
+        if (gameOver)
+        {
+            feedback.ShowSummary(BuildFinalSummary());
+            if (merchant != null) merchant.HideShop();
+            actions.ReturnWorkersHome();
+            return;
+        }
 
         var summary = new StringBuilder();
         summary.AppendLine(gameOver ? "FIM DA PARTIDA" : "RESUMO DO DIA " + currentDay);
@@ -195,6 +239,36 @@ public sealed class DayCycle : MonoBehaviour
         feedback.ShowSummary(summary.ToString());
         if (merchant != null) merchant.HideShop();
         actions.ReturnWorkersHome();
+    }
+
+    private string BuildFinalSummary()
+    {
+        int houses = 0, cows = 0, chickens = 0;
+        if (houseSites != null)
+            foreach (HouseSite site in houseSites)
+                if (site != null && site.IsBuilt) houses++;
+        if (plots != null)
+            foreach (Plot plot in plots)
+            {
+                if (plot == null) continue;
+                if (plot.Animal == AnimalKind.Cow) cows++;
+                else if (plot.Animal == AnimalKind.Chicken) chickens++;
+            }
+
+        var summary = new StringBuilder();
+        summary.AppendLine("FIM DA PARTIDA — " + currentDay + " DIAS");
+        summary.AppendLine("Moedas finais: " + resources.Coins);
+        summary.AppendLine("Coleta: " + totalWoodGained + " madeira | " + totalFishGained + " peixes");
+        summary.AppendLine("Comida preparada: " + totalFoodGained);
+        summary.AppendLine("Terrenos arados: " + totalPlotsPlowed + " | Colheitas: " + totalCropsHarvested);
+        summary.AppendLine("Culturas colhidas: " + totalCropsStored);
+        summary.AppendLine("Casas: " + houses + " | Vacas: " + cows + " | Galinhas: " + chickens);
+        summary.AppendLine("Estoque: " + resources.Wood + " madeira | " + resources.Fish +
+            " peixe | " + resources.Food + " comida");
+        summary.AppendLine("Lavoura: " + resources.Corn + " milho | " + resources.Pumpkin +
+            " macaxeira | " + resources.Jerimum + " jerimum");
+        summary.Append("Animais: " + resources.Milk + " leite | " + resources.Eggs + " ovos");
+        return summary.ToString();
     }
 
     public void ContinueToNextDay()

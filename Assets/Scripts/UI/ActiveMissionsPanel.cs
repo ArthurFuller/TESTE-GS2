@@ -10,6 +10,8 @@ public sealed class ActiveMissionsPanel : MonoBehaviour
     [SerializeField] private Text toggleText;
     [SerializeField] private ActiveMissionCard[] cards;
     [SerializeField] private Sprite[] itemIcons;
+    [SerializeField] private DayTimeline timeline;
+    [SerializeField] private SeedMerchant merchant;
     [SerializeField, Min(0)] private float animationDuration = 0.28f;
     [SerializeField, Min(0)] private float hiddenOffset = 24f;
     private bool isOpen;
@@ -23,6 +25,11 @@ public sealed class ActiveMissionsPanel : MonoBehaviour
 
     public void Toggle()
     {
+        if (!isOpen)
+        {
+            if (timeline != null) timeline.ClosePanel();
+            if (merchant != null && merchant.IsOpen) merchant.HideShop();
+        }
         isOpen = !isOpen;
         ApplyOpenState(false);
     }

@@ -13,11 +13,18 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
 
     private Button button;
     private Image image;
+    private Outline outline;
     private RectTransform rect;
     private Vector3 originalScale;
+    private Vector2 originalPosition;
+    private Quaternion originalRotation;
     private Color originalColor;
     private bool hovered;
     private bool pressedEligible;
+    private bool animating;
+    private int animationStartedFrame = -1;
+    public bool IsAnimating => animating;
+    public bool BlocksNewClicks => animating && animationStartedFrame != Time.frameCount;
 
     private void Awake()
     {
@@ -25,7 +32,14 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         image = GetComponent<Image>();
         rect = (RectTransform)transform;
         originalScale = rect.localScale;
+        originalPosition = rect.anchoredPosition;
+        originalRotation = rect.localRotation;
         if (image != null) originalColor = image.color;
+        outline = GetComponent<Outline>();
+        if (outline == null) outline = gameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(1f, 0.78f, 0.32f, 0.7f);
+        outline.effectDistance = new Vector2(2f, -2f);
+        outline.enabled = false;
     }
 
     private void OnDisable()
@@ -34,6 +48,8 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         {
             rect.DOKill();
             rect.localScale = originalScale;
+            rect.anchoredPosition = originalPosition;
+            rect.localRotation = originalRotation;
         }
         if (image != null)
         {
@@ -42,12 +58,16 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         }
         hovered = false;
         pressedEligible = false;
+        animating = false;
+        if (outline != null) outline.enabled = false;
     }
 
     public void OnPointerEnter(PointerEventData eventData)
     {
         if (button == null || !button.interactable) return;
         hovered = true;
+        if (outline != null) outline.enabled = true;
+        if (animating) return;
         rect.DOKill();
         rect.DOScale(originalScale * hoverScale, duration).SetEase(Ease.OutBack);
         if (image != null)
@@ -57,6 +77,8 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
     public void OnPointerExit(PointerEventData eventData)
     {
         hovered = false;
+        if (outline != null) outline.enabled = false;
+        if (animating) return;
         rect.DOKill();
         rect.DOScale(originalScale, duration).SetEase(Ease.OutCubic);
         if (image != null) image.DOColor(originalColor, duration);
@@ -64,17 +86,53 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        if (!pressedEligible) return;
+        if (!pressedEligible || animating) return;
         pressedEligible = false;
+        animating = true;
+        animationStartedFrame = Time.frameCount;
         rect.DOKill();
         DOTween.Sequence().SetTarget(rect)
             .Append(rect.DOScale(originalScale * pressedScale, 0.08f))
             .Append(rect.DOScale(originalScale * (hovered ? hoverScale : 1f), duration)
-                .SetEase(Ease.OutBack));
+                .SetEase(Ease.OutBack))
+            .OnComplete(() =>
+            {
+                rect.localScale = originalScale * (hovered ? hoverScale : 1f);
+                if (image != null) image.color = hovered ?
+                    new Color(1f, 0.96f, 0.76f, originalColor.a) : originalColor;
+                animating = false;
+            })
+            .OnKill(() => animating = false);
     }
 
     public void OnPointerDown(PointerEventData eventData)
     {
-        pressedEligible = button != null && button.interactable;
+        pressedEligible = !animating && button != null && button.interactable;
+    }
+
+    public void ShakeRejected()
+    {
+        if (rect == null || BlocksNewClicks) return;
+        pressedEligible = false;
+        rect.DOKill();
+        animating = true;
+        animationStartedFrame = Time.frameCount;
+        rect.localScale = originalScale * (hovered ? hoverScale : 1f);
+        rect.anchoredPosition = originalPosition;
+        rect.localRotation = originalRotation;
+        rect.DOShakeRotation(0.32f, new Vector3(0f, 0f, 8f), 12, 90f)
+            .OnComplete(() =>
+            {
+                rect.localRotation = originalRotation;
+                rect.localScale = originalScale * (hovered ? hoverScale : 1f);
+                if (image != null) image.color = hovered ?
+                    new Color(1f, 0.96f, 0.76f, originalColor.a) : originalColor;
+                animating = false;
+            })
+            .OnKill(() =>
+            {
+                rect.localRotation = originalRotation;
+                animating = false;
+            });
     }
 }

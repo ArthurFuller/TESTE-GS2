@@ -16,15 +16,16 @@ public sealed class SeedMerchant : MonoBehaviour
     [SerializeField] private Text shopStatusText;
     [SerializeField] private DragCursorPreview dragPreview;
     [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
+    [SerializeField] private DayTimeline timeline;
     [SerializeField] private ShopTabs shopTabs;
     [SerializeField] private ActivityCardAvailability hand;
     [SerializeField] private HouseSite houseSite;
     [SerializeField] private HouseSite secondHouseSite;
-    [SerializeField, Min(0)] private int fenceWoodCost = 8;
+    [SerializeField, Min(0)] private int fenceWoodCost = 6;
     [SerializeField, Min(0)] private int fenceCoinCost = 8;
     [SerializeField, Min(0)] private int houseWoodCost = 16;
     [SerializeField, Min(0)] private int houseCoinCost = 16;
-    [SerializeField] private int[] marketDays = { 1, 4, 7, 10 };
+    [SerializeField] private int[] marketDays = { 1, 3, 5, 7, 9, 11 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
 
@@ -127,6 +128,7 @@ public sealed class SeedMerchant : MonoBehaviour
         if (!IsAvailable || shopGroup == null) return;
         if (dragPreview != null) dragPreview.CancelCurrentDrag();
         if (activeMissionsPanel != null) activeMissionsPanel.Close();
+        if (timeline != null) timeline.ClosePanel();
         if (shopTabs != null) shopTabs.ShowDefault(true);
         shopGroup.transform.SetAsLastSibling();
         shopGroup.DOKill();

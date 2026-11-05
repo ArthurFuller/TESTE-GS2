@@ -46,6 +46,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private float lastPointerMove;
     private Vector2 previousPointer;
     private bool waitingForTarget;
+    private ActivityCardAvailability Hand => transform.parent != null ?
+        transform.parent.GetComponentInChildren<ActivityCardAvailability>(true) : null;
 
     public ActivityKind Kind => activity;
     public string DisplayName => activityName;
@@ -54,6 +56,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     public bool IsReturning => returning;
     public bool IsDragging => dragging;
     public bool IsReplayAnimating => replayAnimating;
+    public void ResetHoverForSelection() => RestoreHover(true);
 
     public void PlayRejectedReplay()
     {
@@ -67,7 +70,9 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             .Append(rect.DOAnchorPosX(center + 15f, 0.055f))
             .Append(rect.DOAnchorPosX(center - 12f, 0.055f))
             .Append(rect.DOAnchorPosX(center, 0.05f))
-            .OnComplete(AnimateReturn);
+            .SetTarget(rect)
+            .OnComplete(AnimateReturn)
+            .OnKill(() => { if (!waitingForTarget) returning = false; });
     }
 
     public void PlayReplay(WorkerAssignment worker, ActivityKind repeated,
@@ -328,6 +333,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
 
     private void OnEnable()
     {
+        returning = false;
+        waitingForTarget = false;
         if (preview != null) preview.CancelRequested += CancelDrag;
         originalScale = transform.localScale;
         if (activity == ActivityKind.BuySeeds)
@@ -352,6 +359,9 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         }
         CancelDrag();
         RestoreHover(true);
+        ((RectTransform)transform).DOKill();
+        returning = false;
+        waitingForTarget = false;
     }
 
     private void Update()
@@ -376,6 +386,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     public void OnPointerEnter(PointerEventData eventData)
     {
         if (dragging || hovered || returning) return;
+        if (activity != ActivityKind.BuySeeds && Hand != null && Hand.IsSelectionLocked) return;
         hovered = true;
         if (activity == ActivityKind.BuySeeds)
         {
@@ -442,6 +453,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     public void OnBeginDrag(PointerEventData eventData)
     {
         if (!HasEffect || activity == ActivityKind.BuySeeds || returning) return;
+        if (Hand != null && Hand.IsSelectionLocked) return;
+        Hand?.ClosePopupsForDrag();
         RestoreHover(true);
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
@@ -562,11 +575,11 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
 
     private void AnimateReturn()
     {
-        returning = true;
         waitingForTarget = false;
         pendingFloat?.Kill();
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
+        returning = true;
         Vector3 cardCenter = rect.TransformPoint(rect.rect.center);
         rect.pivot = homePivot;
         rect.position += cardCenter - rect.TransformPoint(rect.rect.center);
@@ -577,7 +590,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             .Append(rect.DOAnchorPos(originalPosition, 0.36f).SetEase(Ease.OutBack))
             .Join(rect.DOScale(originalScale, 0.36f).SetEase(Ease.OutBack))
             .SetTarget(rect)
-            .OnComplete(() => RestoreDragSibling(rect));
+            .OnComplete(() => RestoreDragSibling(rect))
+            .OnKill(() => { if (!waitingForTarget) returning = false; });
     }
 
     private void RestoreDragSibling(RectTransform rect)

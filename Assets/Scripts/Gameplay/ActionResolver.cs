@@ -82,9 +82,13 @@ public sealed class ActionResolver : MonoBehaviour
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> busyMovements = new();
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> returningHome = new();
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> working = new();
+    [SerializeField] private Button cancelSelectionButton;
 
     public bool IsBusy => busyWorkers > 0 || replayAnimations > 0 || pendingFoodWorker != null ||
+        pendingPlotWorker != null ||
         HasGatheringWorker(forestTasks) || HasGatheringWorker(fishingTasks);
+    public bool HasPendingSelection => pendingPlotWorker != null;
+    public event System.Action<bool> PendingSelectionChanged;
     public bool GatheringNeedsPlayer => NeedsGatheringPlayer(forestTasks) ||
         NeedsGatheringPlayer(fishingTasks);
     public int WoodGainedToday { get; private set; }
@@ -96,6 +100,21 @@ public sealed class ActionResolver : MonoBehaviour
     public event System.Action<ActivityCardDrag> CardUsed;
     public event System.Action<int, ActivityCardDrag> CardPlayed;
     public int AssignmentVersion { get; private set; }
+
+    private void Awake()
+    {
+        if (cancelSelectionButton == null)
+            foreach (Button candidate in FindObjectsByType<Button>(FindObjectsInactive.Include,
+                         FindObjectsSortMode.None))
+                if (candidate.name == "Cancelar escolha de terreno")
+                {
+                    cancelSelectionButton = candidate;
+                    break;
+                }
+        if (cancelSelectionButton == null) return;
+        cancelSelectionButton.onClick.AddListener(CancelPendingSelection);
+        cancelSelectionButton.gameObject.SetActive(false);
+    }
 
     private void Start()
     {
@@ -121,6 +140,8 @@ public sealed class ActionResolver : MonoBehaviour
             forestVisitButton.onClick.RemoveListener(VisitForestWorker);
         if (fishingVisitButton != null)
             fishingVisitButton.onClick.RemoveListener(VisitFishingWorker);
+        if (cancelSelectionButton != null)
+            cancelSelectionButton.onClick.RemoveListener(CancelPendingSelection);
     }
 
     private void Update()
@@ -180,6 +201,11 @@ public sealed class ActionResolver : MonoBehaviour
             feedback.ShowMessage("Confirme ou cancele o preparo de comida primeiro.");
             return;
         }
+        if (pendingPlotWorker != null)
+        {
+            feedback.ShowMessage("Escolha um terreno ou cancele a carta ativa primeiro.");
+            return;
+        }
         if (activity == ActivityKind.BuySeeds)
         {
             if (merchant != null) merchant.ToggleShop();
@@ -227,7 +253,6 @@ public sealed class ActionResolver : MonoBehaviour
                     TryAssignInternal(worker, ActivityKind.Replay, activityName, card, true);
                 });
                 if (disposable) hand.ConsumeReplayDisposable(revealed);
-                CardUsed?.Invoke(card);
                 return;
             }
             if (repeated == ActivityKind.Coffee)
@@ -388,6 +413,7 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void ClearPendingPlot()
     {
+        bool hadSelection = pendingPlotWorker != null;
         Plot.ClearHighlights();
         HouseSite.ClearHighlights();
         pendingPlotCard?.ReturnFromSelection();
@@ -395,16 +421,39 @@ public sealed class ActionResolver : MonoBehaviour
             pendingPlotWorker.SetStatus("livre");
         pendingPlotWorker = null;
         pendingPlotCard = null;
+        if (cancelSelectionButton != null) cancelSelectionButton.gameObject.SetActive(false);
+        if (hadSelection) PendingSelectionChanged?.Invoke(false);
+    }
+
+    public void CancelPendingSelection()
+    {
+        if (pendingPlotWorker == null) return;
+        ClearPendingPlot();
+        feedback.ShowMessage("Escolha cancelada. A carta voltou para a mão.");
     }
 
     private void SelectPlot(WorkerAssignment worker, ActivityKind activity, string activityName,
         ActivityCardDrag card)
     {
+        bool available = activity == ActivityKind.BuildHouse ? HouseSite.HasAvailable() :
+            Plot.HasAvailable(activity, dayCycle.CurrentDay, seedCatalog);
+        if (!available)
+        {
+            feedback.ShowMessage("Não há alvo disponível para essa carta.");
+            card?.PlayRejectedReplay();
+            return;
+        }
         AssignmentVersion++;
         pendingPlotWorker = worker;
         pendingPlotCard = card;
         pendingPlotAction = activity;
         card?.FlyToSelection();
+        if (cancelSelectionButton != null)
+        {
+            cancelSelectionButton.gameObject.SetActive(true);
+            cancelSelectionButton.transform.SetAsLastSibling();
+        }
+        PendingSelectionChanged?.Invoke(true);
         Plot.ShowAvailable(activity, dayCycle.CurrentDay, seedCatalog);
         if (activity == ActivityKind.BuildHouse) HouseSite.ShowAvailable();
         worker.Select();
@@ -673,28 +722,45 @@ public sealed class ActionResolver : MonoBehaviour
         }
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
+        var targets = plot.ReadyConnectedPlots(dayCycle.CurrentDay, seedCatalog);
         CommitAction(worker, ActivityKind.Harvest, "colhendo", card);
-        MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
+        HarvestNext(0);
+
+        void HarvestNext(int index)
         {
-            int harvestYield = plot.HarvestYield(dayCycle.CurrentDay, seedCatalog);
-            CropType crop = plot.Harvest();
-            CropSettings settings = seedCatalog.Get(crop);
-            int gained = Mathf.Max(0, harvestYield - worker.ProductionReduction -
-                (dayEvents != null ? dayEvents.HarvestReduction : 0));
-            resources.AddCrop(crop, gained);
-            if (resourceHud != null)
+            if (index >= targets.Count)
             {
-                ResourceKind kind = crop == CropType.Corn ? ResourceKind.Corn :
-                    crop == CropType.Pumpkin ? ResourceKind.Pumpkin : ResourceKind.Jerimum;
-                resourceHud.FlyFromWorld(kind, gained, plot.transform.position + Vector3.up,
-                    0.8f);
+                worker.SetStatus("colheita concluída");
+                SendWorkerHome(worker);
+                return;
             }
-            CropsStoredToday += gained;
-            CropsHarvestedToday++;
-            worker.SetStatus("colheita concluída");
-            feedback.ShowMessage("+" + gained + " " + settings.displayName + " guardado(s)");
-            SendWorkerHome(worker);
-        });
+            Plot target = targets[index];
+            if (target == null || !target.IsReady(dayCycle.CurrentDay, seedCatalog))
+            {
+                HarvestNext(index + 1);
+                return;
+            }
+            MoveAndWork(worker, target.WorkPosition, plowWorkDuration, () =>
+            {
+                int harvestYield = target.HarvestYield(dayCycle.CurrentDay, seedCatalog);
+                CropType crop = target.Harvest();
+                CropSettings settings = seedCatalog.Get(crop);
+                int gained = Mathf.Max(0, harvestYield - worker.ProductionReduction -
+                    (dayEvents != null ? dayEvents.HarvestReduction : 0));
+                resources.AddCrop(crop, gained);
+                if (resourceHud != null)
+                {
+                    ResourceKind kind = crop == CropType.Corn ? ResourceKind.Corn :
+                        crop == CropType.Pumpkin ? ResourceKind.Pumpkin : ResourceKind.Jerimum;
+                    resourceHud.FlyFromWorld(kind, gained, target.transform.position + Vector3.up,
+                        0.8f);
+                }
+                CropsStoredToday += gained;
+                CropsHarvestedToday++;
+                feedback.ShowMessage("+" + gained + " " + settings.displayName + " guardado(s)");
+                HarvestNext(index + 1);
+            });
+        }
     }
 
     public bool ConfirmFoodPreparation(int fish, int corn, int pumpkin, int jerimum, int milk, int eggs)
@@ -743,6 +809,8 @@ public sealed class ActionResolver : MonoBehaviour
         WorkerAssignment worker = pendingPlotWorker;
         pendingPlotWorker = null;
         pendingPlotCard = null;
+        if (cancelSelectionButton != null) cancelSelectionButton.gameObject.SetActive(false);
+        PendingSelectionChanged?.Invoke(false);
         Plot.ClearHighlights();
         HouseSite.ClearHighlights();
         pendingFoodCard = null;
@@ -752,11 +820,7 @@ public sealed class ActionResolver : MonoBehaviour
 
     public void ReturnWorkersHome()
     {
-        pendingPlotCard?.ReturnFromSelection();
-        pendingPlotWorker = null;
-        pendingPlotCard = null;
-        Plot.ClearHighlights();
-        HouseSite.ClearHighlights();
+        ClearPendingPlot();
         foreach (WorkerAssignment worker in workers)
         {
             if (worker == null || movements.ContainsKey(worker) ||
@@ -769,10 +833,7 @@ public sealed class ActionResolver : MonoBehaviour
     public void BeginNextDay()
     {
         if (forestTrees != null) forestTrees.ResetTrees();
-        pendingPlotWorker = null;
-        pendingPlotCard = null;
-        Plot.ClearHighlights();
-        HouseSite.ClearHighlights();
+        ClearPendingPlot();
         pendingFoodWorker = null;
         pendingFoodCard = null;
         WoodGainedToday = 0;

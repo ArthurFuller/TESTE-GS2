@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.InputSystem;
 
 public sealed class CardRewardChoice : MonoBehaviour
 {
@@ -25,6 +26,7 @@ public sealed class CardRewardChoice : MonoBehaviour
     private readonly List<ActivityCardDrag> available = new List<ActivityCardDrag>();
     private readonly HashSet<ActivityKind> chosenKinds = new HashSet<ActivityKind>();
     private readonly NameStyle[] defaultNames = new NameStyle[2];
+    private readonly Text[] descriptions = new Text[2];
     private Action completed;
     private int currentDay;
 
@@ -80,6 +82,36 @@ public sealed class CardRewardChoice : MonoBehaviour
                 homes[i] = choiceCards[i].anchoredPosition;
                 Transform glow = choiceCards[i].parent.Find("Brilho " + (i + 1));
                 if (glow != null) glows[i] = glow.GetComponent<Image>();
+                var tip = new GameObject("Descrição da carta", typeof(RectTransform),
+                    typeof(CanvasRenderer), typeof(Image));
+                RectTransform tipRect = (RectTransform)tip.transform;
+                tipRect.SetParent(choiceCards[i], false);
+                tipRect.anchorMin = tipRect.anchorMax = new Vector2(i == 0 ? 0f : 1f, 0.5f);
+                tipRect.pivot = new Vector2(i == 0 ? 1f : 0f, 0.5f);
+                tipRect.anchoredPosition = new Vector2(i == 0 ? -10f : 10f, 0f);
+                tipRect.sizeDelta = new Vector2(190f, 60f);
+                Image background = tip.GetComponent<Image>();
+                background.color = new Color(0.1f, 0.09f, 0.07f, 0.92f);
+                background.raycastTarget = false;
+                var textObject = new GameObject("Texto", typeof(RectTransform),
+                    typeof(CanvasRenderer), typeof(Text));
+                RectTransform textRect = (RectTransform)textObject.transform;
+                textRect.SetParent(tipRect, false);
+                textRect.anchorMin = Vector2.zero;
+                textRect.anchorMax = Vector2.one;
+                textRect.offsetMin = new Vector2(8f, 6f);
+                textRect.offsetMax = new Vector2(-8f, -6f);
+                Text description = textObject.GetComponent<Text>();
+                description.font = choiceNames != null && i < choiceNames.Length &&
+                    choiceNames[i] != null ? choiceNames[i].font : null;
+                description.fontSize = 14;
+                description.color = Color.white;
+                description.alignment = TextAnchor.MiddleCenter;
+                description.resizeTextForBestFit = true;
+                description.resizeTextMinSize = 11;
+                description.raycastTarget = false;
+                descriptions[i] = description;
+                tip.SetActive(false);
             }
         for (int i = 0; i < choiceButtons.Length && i < 2; i++)
         {
@@ -103,6 +135,19 @@ public sealed class CardRewardChoice : MonoBehaviour
             if (card != null) card.DOKill();
         foreach (Image glow in glows)
             if (glow != null) glow.DOKill();
+    }
+
+    private void Update()
+    {
+        if (group == null || !group.interactable || Mouse.current == null) return;
+        Vector2 pointer = Mouse.current.position.ReadValue();
+        for (int i = 0; i < descriptions.Length; i++)
+        {
+            if (descriptions[i] == null || choiceCards[i] == null) continue;
+            bool inside = RectTransformUtility.RectangleContainsScreenPoint(choiceCards[i], pointer);
+            descriptions[i].gameObject.transform.parent.gameObject.SetActive(inside &&
+                offered[i] != null && !string.IsNullOrWhiteSpace(offered[i].Description));
+        }
     }
 
     public void Begin(int day, Action onCompleted)
@@ -181,6 +226,11 @@ public sealed class CardRewardChoice : MonoBehaviour
         choiceArt[index].color = Color.white;
         Text label = choiceNames[index];
         if (label == null) return;
+        if (descriptions[index] != null)
+        {
+            descriptions[index].text = offered[index].Description;
+            descriptions[index].transform.parent.gameObject.SetActive(false);
+        }
         label.gameObject.SetActive(placeholder);
         if (!placeholder) return;
         defaultNames[index].Apply(label);
@@ -247,6 +297,8 @@ public sealed class CardRewardChoice : MonoBehaviour
         group.blocksRaycasts = false;
         foreach (Button button in rerollButtons)
             if (button != null) button.gameObject.SetActive(false);
+        foreach (Text description in descriptions)
+            if (description != null) description.transform.parent.gameObject.SetActive(false);
         for (int i = 0; i < choiceCards.Length && i < 2; i++)
             if (choiceCards[i] != null)
             {

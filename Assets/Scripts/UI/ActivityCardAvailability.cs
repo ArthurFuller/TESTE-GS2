@@ -12,6 +12,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     [SerializeField] private ActivityCardDrag[] cardPrefabs;
     [SerializeField] private ResourceBank resources;
     [SerializeField] private SeedMerchant merchant;
+    [SerializeField] private DayTimeline timeline;
+    [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
     [SerializeField] private ActionResolver actions;
     [SerializeField] private DayCycle dayCycle;
     [SerializeField] private Camera worldCamera;
@@ -60,6 +62,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private bool initialized;
     private bool ducked;
     private bool entranceSuspended;
+    private bool selectionLocked;
     [SerializeField, Min(0.1f)] private float dayExitDuration = 0.38f;
     [SerializeField, Min(0f)] private float dayExitWaveDelay = 0.07f;
     public bool HasRoom => shown.Count + spent.Count + pendingRewards.Count < maxHandCards ||
@@ -67,6 +70,13 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     public int FreeSlots => Mathf.Max(0, maxHandCards - shown.Count - spent.Count -
         pendingRewards.Count + testCards.Count);
     public bool ContainsCard(ActivityCardDrag card) => shown.Contains(card);
+    public bool IsSelectionLocked => selectionLocked;
+    public void ClosePopupsForDrag()
+    {
+        if (timeline != null) timeline.ClosePanel();
+        if (activeMissionsPanel != null) activeMissionsPanel.Close();
+        if (merchant != null && merchant.IsOpen) merchant.HideShop();
+    }
     public bool HasDisposable(ActivityKind kind) => FindDisposable(kind) != null;
     public bool ConsumeReplayDisposable(ActivityKind kind)
     {
@@ -97,6 +107,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (resources != null) resources.Changed += Refresh;
         if (merchant != null) merchant.AvailabilityChanged += Refresh;
         if (actions != null) actions.CardUsed += OnCardUsed;
+        if (actions != null) actions.PendingSelectionChanged += SetSelectionLocked;
         if (dayCycle == null) dayCycle = FindFirstObjectByType<DayCycle>();
         if (dayCycle != null) dayCycle.DayChanged += OnDayChanged;
         Refresh();
@@ -111,6 +122,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (resources != null) resources.Changed -= Refresh;
         if (merchant != null) merchant.AvailabilityChanged -= Refresh;
         if (actions != null) actions.CardUsed -= OnCardUsed;
+        if (actions != null) actions.PendingSelectionChanged -= SetSelectionLocked;
         if (dayCycle != null) dayCycle.DayChanged -= OnDayChanged;
         DOTween.Kill(this);
         shopPositionTween?.Kill();
@@ -148,7 +160,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             ClearHover(true);
             Layout(true);
         }
-        if (entranceSuspended || !pointerInside || Mouse.current == null) return;
+        if (entranceSuspended || selectionLocked || !pointerInside || Mouse.current == null) return;
         SetHover(CardAt(Mouse.current.position.ReadValue(), null));
     }
 
@@ -230,6 +242,18 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private void OnDayChanged()
     {
         AnimateDayEntrance(true);
+    }
+
+    private void SetSelectionLocked(bool locked)
+    {
+        selectionLocked = locked;
+        ClearHover(true);
+        if (locked)
+            foreach (ActivityCardDrag card in shown)
+                if (card != null && !card.IsDragging && !card.IsReturning)
+                    card.ResetHoverForSelection();
+        ducked = locked;
+        Layout(true, true);
     }
 
     public void ReturnAfterCancelledDay()
@@ -555,10 +579,10 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             rect.DOKill();
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
             rect.pivot = new Vector2(0.5f, 0f);
-            Vector2 position = CardPosition(i);
+            Vector2 position = CardPosition(i) + Vector2.down * (ducked ? 40f : 0f);
             if (animate)
             {
-                rect.DOAnchorPos(position + Vector2.down * (ducked ? 40f : 0f), 0.24f)
+                rect.DOAnchorPos(position, 0.24f)
                     .SetEase(Ease.OutCubic);
                 rect.DOLocalRotate(new Vector3(0f, 0f, CardAngle(position.x)), 0.24f);
                 rect.DOScale(normalScale, 0.24f);
@@ -590,7 +614,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public bool IsRaycastLocationValid(Vector2 screenPoint, Camera eventCamera)
     {
-        if (entranceSuspended || shown.Count == 0) return false;
+        if (entranceSuspended || selectionLocked || shown.Count == 0) return false;
         for (int i = 0; i < shown.Count; i++)
             if (!shown[i].IsReturning && ContainsCard(i, screenPoint, eventCamera)) return true;
         return false;
@@ -644,6 +668,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public void OnPointerEnter(PointerEventData eventData)
     {
+        if (selectionLocked) return;
         pointerInside = true;
         SetHover(CardAt(eventData.position, eventData.enterEventCamera));
     }
@@ -656,6 +681,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     private void SetHover(ActivityCardDrag card)
     {
+        if (selectionLocked) return;
         if (card == hovered) return;
         ClearHover(false);
         hovered = card;
@@ -763,6 +789,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        if (selectionLocked) return;
         ActivityCardDrag card = CardAt(eventData.pressPosition, eventData.pressEventCamera);
         if (card == null || testCards.Contains(card) || !card.HasEffect) return;
         ClearHover(true);
@@ -779,6 +806,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public void UpdateDucked(Vector2 screenPosition, Camera eventCamera)
     {
+        if (selectionLocked) return;
         bool outside = !RectTransformUtility.RectangleContainsScreenPoint(DragBoundary,
             screenPosition, eventCamera);
         if (outside == ducked) return;
@@ -788,6 +816,12 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     public void EndExternalDrag()
     {
+        if (selectionLocked)
+        {
+            ducked = true;
+            Layout(true, true);
+            return;
+        }
         if (!ducked) return;
         ducked = false;
         Layout(true, true);
@@ -798,9 +832,10 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (dragging == null) return;
         dragging.OnEndDrag(eventData);
         dragging = null;
-        ducked = false;
+        ducked = selectionLocked;
         Layout(true, true);
-        if (pointerInside) SetHover(CardAt(eventData.position, eventData.enterEventCamera));
+        if (pointerInside && !selectionLocked)
+            SetHover(CardAt(eventData.position, eventData.enterEventCamera));
     }
 
 }
