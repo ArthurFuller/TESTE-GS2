@@ -2,11 +2,34 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 
-public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre, Calm }
+public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre, Calm, HeadOfCuia }
 
 public sealed class DayEventController : MonoBehaviour
 {
+    public readonly struct TimelineEvent
+    {
+        public readonly string Title;
+        public readonly string Description;
+        public readonly Sprite Art;
+        public readonly int StartedOn;
+
+        public TimelineEvent(string title, string description, Sprite art, int startedOn)
+        {
+            Title = title;
+            Description = description;
+            Art = art;
+            StartedOn = startedOn;
+        }
+    }
+
+    private sealed class ActiveComadre
+    {
+        public int StartedOn;
+        public int DaysRemaining;
+    }
+
     [SerializeField] private EventCardView card;
+    [SerializeField] private ResourceBank resources;
     [SerializeField] private Plot[] plots;
     [SerializeField] private WorkerAssignment[] workers;
     [Header("Artes dos eventos")]
@@ -14,6 +37,7 @@ public sealed class DayEventController : MonoBehaviour
     [SerializeField] private Sprite rainArt;
     [SerializeField] private Sprite comadreArt;
     [SerializeField] private Sprite calmArt;
+    [SerializeField] private Sprite headOfCuiaArt;
     [Header("Parâmetros provisórios de eventos")]
     [SerializeField, Range(0f, 1f)] private float generalEventChance = 0.35f;
     [SerializeField, Min(1)] private int eventDurationDays = 2;
@@ -25,25 +49,20 @@ public sealed class DayEventController : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float comadreChance = 0.5f;
     [SerializeField, Min(1)] private int comadreAbsenceDays = 1;
     [SerializeField, Min(0)] private int rainForestRecovery = 2;
+    [SerializeField, Min(1)] private int headOfCuiaFishTheft = 2;
 
     private SertaoEventKind activeGeneralEvent;
+    private int generalStartedOn;
     private int generalDaysRemaining;
     private int forestExploitation;
-    private readonly Dictionary<int, (string Title, Sprite Art)> announcedEvents = new();
+    private int stolenFishToday;
+    private readonly List<ActiveComadre> activeComadre = new();
+    private readonly Dictionary<int, List<TimelineEvent>> eventsByDay = new();
 
     public bool IsPanelOpen => card != null && card.IsOpen;
-    public bool TryGetEvent(int day, out string title, out Sprite art)
-    {
-        if (announcedEvents.TryGetValue(day, out var record))
-        {
-            title = record.Title;
-            art = record.Art;
-            return true;
-        }
-        title = null;
-        art = null;
-        return false;
-    }
+    public IReadOnlyList<TimelineEvent> EventsForDay(int day) =>
+        eventsByDay.TryGetValue(day, out List<TimelineEvent> events) ?
+            events : System.Array.Empty<TimelineEvent>();
 
     public void AfterEventCardClosed(System.Action action)
     {
@@ -75,8 +94,14 @@ public sealed class DayEventController : MonoBehaviour
 
     public void StartDay(int day)
     {
+        stolenFishToday = 0;
         if (generalDaysRemaining > 0) generalDaysRemaining--;
         if (generalDaysRemaining == 0) activeGeneralEvent = SertaoEventKind.None;
+        for (int i = activeComadre.Count - 1; i >= 0; i--)
+        {
+            activeComadre[i].DaysRemaining--;
+            if (activeComadre[i].DaysRemaining <= 0) activeComadre.RemoveAt(i);
+        }
 
         SertaoEventKind announced = SertaoEventKind.None;
         if (forestExploitation >= forestExploitationThreshold && Random.value < comadreChance)
@@ -87,6 +112,10 @@ public sealed class DayEventController : MonoBehaviour
             if (candidates.Count > 1)
             {
                 candidates[Random.Range(0, candidates.Count)].ScheduleAbsence(comadreAbsenceDays);
+                activeComadre.Add(new ActiveComadre
+                {
+                    StartedOn = day, DaysRemaining = comadreAbsenceDays
+                });
                 forestExploitation = 0;
                 announced = SertaoEventKind.Comadre;
             }
@@ -94,9 +123,20 @@ public sealed class DayEventController : MonoBehaviour
         if (announced == SertaoEventKind.None && activeGeneralEvent == SertaoEventKind.None &&
             Random.value < generalEventChance)
         {
-            activeGeneralEvent = (SertaoEventKind)Random.Range(1, 4);
-            generalDaysRemaining = eventDurationDays;
-            announced = activeGeneralEvent;
+            int roll = Random.Range(0, resources != null && resources.Fish > 0 ? 4 : 3);
+            announced = roll == 3 ? SertaoEventKind.HeadOfCuia :
+                (SertaoEventKind)(roll + 1);
+            if (announced == SertaoEventKind.HeadOfCuia)
+            {
+                stolenFishToday = Mathf.Min(resources.Fish, headOfCuiaFishTheft);
+                resources.TryDeliverFish(stolenFishToday);
+            }
+            else
+            {
+                activeGeneralEvent = announced;
+                generalStartedOn = day;
+                generalDaysRemaining = eventDurationDays;
+            }
         }
 
         if (activeGeneralEvent == SertaoEventKind.Drought)
@@ -110,8 +150,23 @@ public sealed class DayEventController : MonoBehaviour
         }
         if (announced == SertaoEventKind.None && activeGeneralEvent == SertaoEventKind.None)
             announced = SertaoEventKind.Calm;
-        if (announced != SertaoEventKind.None)
-            announcedEvents[day] = (Title(announced), Art(announced));
+        var activeToday = new List<TimelineEvent>();
+        if (activeGeneralEvent != SertaoEventKind.None)
+            activeToday.Add(new TimelineEvent(Title(activeGeneralEvent),
+                Description(activeGeneralEvent),
+                Art(activeGeneralEvent), generalStartedOn));
+        foreach (ActiveComadre comadre in activeComadre)
+            activeToday.Add(new TimelineEvent(Title(SertaoEventKind.Comadre),
+                Description(SertaoEventKind.Comadre),
+                Art(SertaoEventKind.Comadre), comadre.StartedOn));
+        if (announced == SertaoEventKind.Calm)
+            activeToday.Add(new TimelineEvent(Title(announced),
+                Description(announced), Art(announced), day));
+        else if (announced == SertaoEventKind.HeadOfCuia)
+            activeToday.Add(new TimelineEvent(Title(announced),
+                Description(announced), Art(announced), day));
+        activeToday.Sort((a, b) => a.StartedOn.CompareTo(b.StartedOn));
+        eventsByDay[day] = activeToday;
         if (announced != SertaoEventKind.None && card != null)
             card.Show(Title(announced), Description(announced), Art(announced));
     }
@@ -122,6 +177,7 @@ public sealed class DayEventController : MonoBehaviour
         SertaoEventKind.Rain => rainArt,
         SertaoEventKind.Comadre => comadreArt,
         SertaoEventKind.Calm => calmArt,
+        SertaoEventKind.HeadOfCuia => headOfCuiaArt,
         _ => null
     };
 
@@ -131,6 +187,7 @@ public sealed class DayEventController : MonoBehaviour
         SertaoEventKind.Pests => "PRAGAS",
         SertaoEventKind.Rain => "CHUVA",
         SertaoEventKind.Calm => "DIA TRANQUILO",
+        SertaoEventKind.HeadOfCuia => "CABEÇA DE CUIA",
         _ => "COMADRE FULOZINHA"
     };
 
@@ -140,6 +197,8 @@ public sealed class DayEventController : MonoBehaviour
         SertaoEventKind.Pests => "As pragas reduzem a colheita. Duração: " + eventDurationDays + " dia(s).",
         SertaoEventKind.Rain => "A chuva acelera o crescimento e reduz o impacto da coleta de madeira. Duração: " + eventDurationDays + " dia(s).",
         SertaoEventKind.Calm => "O dia começou tranquilo. Nenhum evento especial altera a rotina hoje.",
+        SertaoEventKind.HeadOfCuia => "O Cabeça de Cuia roubou " + stolenFishToday +
+            (stolenFishToday == 1 ? " peixe." : " peixes."),
         _ => "A exploração da floresta desorientou um trabalhador por " + comadreAbsenceDays + " dia(s)."
     };
 }

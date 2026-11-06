@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 [ExecuteAlways]
@@ -11,6 +12,7 @@ public sealed class DayTimeline : MonoBehaviour
     [SerializeField] private DayEventController dayEvents;
     [SerializeField] private ActiveMissionsPanel activeMissionsPanel;
     [SerializeField] private SeedMerchant merchant;
+    [SerializeField] private ActivityCardAvailability hand;
     [SerializeField] private RectTransform topBar;
     [SerializeField] private RectTransform missionsButton;
     [SerializeField] private Font font;
@@ -28,16 +30,26 @@ public sealed class DayTimeline : MonoBehaviour
     [SerializeField, Min(65f)] private float cardHeight = 83f;
     [SerializeField, Min(0f)] private float cardGap = 10f;
     [SerializeField, Min(1f)] private float cardLineHeight = 3f;
+    [SerializeField, Min(0f)] private float cardOverlap = 34f;
+    [SerializeField, Min(1f)] private float pegSize = 18f;
+    [SerializeField, Range(0f, 15f)] private float hangingAngle = 7f;
+    [SerializeField, Min(1f)] private float cardHoverScale = 1.2f;
+    [SerializeField] private Sprite clothespinArt;
     [SerializeField, Min(0f)] private float cardStartX = 18f;
     [SerializeField, Min(0f)] private float cardTopInset = 8f;
     [SerializeField] private float cardLineOffsetY;
     [Header("Animação")]
     [SerializeField, Min(0.05f)] private float slideDuration = 0.36f;
     [SerializeField, Min(0f)] private float waveDelay = 0.055f;
+    [Header("Inspeção da carta")]
+    [SerializeField, Range(0f, 35f)] private float inspectionTilt = 22f;
+    [SerializeField, Min(0f)] private float inspectionShift = 14f;
+    [SerializeField, Min(0.1f)] private float inspectionFollowSpeed = 12f;
 
     private sealed class PlayedCard
     {
         public string Name;
+        public string Description;
         public Sprite Art;
     }
 
@@ -64,6 +76,12 @@ public sealed class DayTimeline : MonoBehaviour
     private Vector2 panelHomePosition;
     private bool open;
     private int viewedDay;
+    private RectTransform inspectionCard;
+    private RectTransform inspectionShade;
+    private RectTransform inspectionDescription;
+    private CanvasGroup inspectionSource;
+    private Sequence inspectionTween;
+    private bool inspectionFromTimeline;
 
     private void Awake()
     {
@@ -90,6 +108,7 @@ public sealed class DayTimeline : MonoBehaviour
 
     private void OnDisable()
     {
+        CloseInspection(true);
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.delayCall -= RefreshEditor;
         UnityEditor.EditorApplication.delayCall -= RefreshInspector;
@@ -113,6 +132,15 @@ public sealed class DayTimeline : MonoBehaviour
         if (!Application.isPlaying)
         {
             RefreshEditor();
+            return;
+        }
+        if (inspectionCard != null)
+        {
+            TimelineCardInspection inspection =
+                inspectionCard.GetComponent<TimelineCardInspection>();
+            if (inspection != null)
+                inspection.Configure(inspectionTilt, inspectionShift,
+                    inspectionFollowSpeed);
             return;
         }
         if (open && viewedDay > 0 && cardScroll != null &&
@@ -143,12 +171,16 @@ public sealed class DayTimeline : MonoBehaviour
         }
         Image image = card.GetComponent<Image>();
         cards.Add(new PlayedCard { Name = card.DisplayName,
+            Description = card.Description,
             Art = image != null ? image.sprite : null });
         if (open && viewedDay == day) RenderCards(day, false);
     }
 
     private void Update()
     {
+        if (inspectionCard != null && Keyboard.current != null &&
+            Keyboard.current.escapeKey.wasPressedThisFrame)
+            CloseInspection(false);
         if (Application.isPlaying && open && days != null && !days.CanAcceptActions)
             Close();
     }
@@ -470,6 +502,7 @@ public sealed class DayTimeline : MonoBehaviour
 
     private void Close()
     {
+        CloseInspection(true);
         open = false;
         DOTween.Kill(this);
         panel.DOKill();
@@ -481,6 +514,7 @@ public sealed class DayTimeline : MonoBehaviour
 
     private void CloseImmediately()
     {
+        CloseInspection(true);
         if (panel == null) return;
         open = false;
         viewedDay = 0;
@@ -575,18 +609,20 @@ public sealed class DayTimeline : MonoBehaviour
 
     private void RenderCards(int day, bool animate)
     {
+        CloseInspection(true);
         Clear(cardContent);
         cardNodes.Clear();
         cardLines.Clear();
         var cards = new List<PlayedCard>();
+        if (dayEvents != null)
+            foreach (DayEventController.TimelineEvent active in dayEvents.EventsForDay(day))
+                cards.Add(new PlayedCard { Name = active.Title,
+                    Description = active.Description, Art = active.Art });
         if (history.TryGetValue(day, out List<PlayedCard> played)) cards.AddRange(played);
-        if (dayEvents != null && dayEvents.TryGetEvent(day, out string eventName,
-                out Sprite eventArt))
-            cards.Insert(0, new PlayedCard { Name = eventName, Art = eventArt });
         int count = cards.Count;
-        float stride = cardWidth + cardGap;
+        float stride = Mathf.Max(12f, cardWidth + cardGap - cardOverlap);
         float width = Mathf.Max(scroll.viewport.rect.width,
-            count * stride + cardStartX * 2f);
+            (count - 1) * stride + cardWidth + cardStartX * 2f);
         cardContent.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
         scroll.horizontalNormalizedPosition = 0f;
         if (count == 0)
@@ -600,23 +636,20 @@ public sealed class DayTimeline : MonoBehaviour
             cardNodes.Add(empty);
             return;
         }
-        float cardY = -cardTopInset;
-        float lineY = cardY - cardHeight * 0.5f + cardLineOffsetY;
+        float cardY = -cardTopInset - pegSize * 0.5f;
+        float lineY = cardY + pegSize * 0.35f + cardLineOffsetY;
         float entryY = cardHeight + cardTopInset + 4f;
-        for (int i = 0; i < count - 1; i++)
-        {
-            RectTransform line = Box("Ligação da carta " + (i + 1), cardContent,
-                new Color(0.32f, 0.28f, 0.2f), false);
-            line.anchorMin = line.anchorMax = new Vector2(0f, 1f);
-            line.pivot = new Vector2(0f, 0.5f);
-            line.sizeDelta = new Vector2(stride, cardLineHeight);
-            line.anchoredPosition = new Vector2(cardStartX + cardWidth * 0.5f + i * stride,
-                animate ? entryY : lineY);
-            cardLines.Add(line);
-            if (animate)
-                line.DOAnchorPosY(lineY, slideDuration)
-                    .SetDelay((i + 0.5f) * waveDelay).SetEase(Ease.OutCubic);
-        }
+        RectTransform line = Box("Varal das cartas", cardContent,
+            new Color(0.32f, 0.28f, 0.2f), false);
+        line.GetComponent<Image>().raycastTarget = false;
+        line.anchorMin = line.anchorMax = new Vector2(0f, 1f);
+        line.pivot = new Vector2(0f, 0.5f);
+        line.sizeDelta = new Vector2(width - cardStartX * 2f, cardLineHeight);
+        line.anchoredPosition = new Vector2(cardStartX,
+            animate ? entryY : lineY);
+        cardLines.Add(line);
+        if (animate)
+            line.DOAnchorPosY(lineY, slideDuration).SetEase(Ease.OutCubic);
         for (int i = 0; i < count; i++)
         {
             PlayedCard data = cards[i];
@@ -627,19 +660,209 @@ public sealed class DayTimeline : MonoBehaviour
             card.sizeDelta = new Vector2(cardWidth, cardHeight);
             float x = cardStartX + cardWidth * 0.5f + i * stride;
             card.anchoredPosition = new Vector2(x, animate ? entryY : cardY);
+            float angle = Mathf.Sin((i + 1) * 2.15f) * hangingAngle;
+            card.localRotation = Quaternion.Euler(0f, 0f, angle);
             cardNodes.Add(card);
             Image art = card.GetComponent<Image>();
             art.sprite = data.Art;
             art.preserveAspect = true;
-            if (data.Art == null)
+            bool placeholder = data.Art == null ||
+                data.Art.name.Contains("9-SlicedBox");
+            if (placeholder)
             {
-                art.color = new Color(0.92f, 0.88f, 0.76f);
+                if (data.Art == null) art.color = new Color(0.92f, 0.88f, 0.76f);
                 Label(data.Name, card, 9, new Color(0.55f, 0.1f, 0.1f));
             }
+            if (clothespinArt != null)
+            {
+                RectTransform peg = Box("Pregador", card, Color.white, false);
+                peg.anchorMin = peg.anchorMax = new Vector2(0.5f, 1f);
+                peg.pivot = new Vector2(0.5f, 0.5f);
+                // A arte tem margens transparentes largas; o retângulo compensa isso.
+                peg.sizeDelta = new Vector2(pegSize * 2.7f, pegSize * 2f);
+                peg.anchoredPosition = new Vector2(0f, 0f);
+                Image pegImage = peg.GetComponent<Image>();
+                pegImage.sprite = clothespinArt;
+                pegImage.preserveAspect = false;
+                pegImage.raycastTarget = false;
+            }
+            card.gameObject.AddComponent<TimelineCardHover>()
+                .Setup(angle, cardHoverScale, cardY,
+                    source => InspectCard(source, data.Name, data.Description, true));
             if (animate)
                 card.DOAnchorPosY(cardY, slideDuration).SetDelay(i * waveDelay)
                     .SetEase(Ease.OutBack);
         }
+    }
+
+    public void InspectHandCard(ActivityCardDrag card)
+    {
+        if (card != null)
+            InspectCard((RectTransform)card.transform, card.DisplayName,
+                card.Description, false);
+    }
+
+    private void InspectCard(RectTransform source, string cardName,
+        string description, bool fromTimeline)
+    {
+        if ((fromTimeline && !open) || source == null || inspectionCard != null) return;
+        if (hand == null) hand = FindFirstObjectByType<ActivityCardAvailability>();
+        Canvas canvas = GetComponent<Canvas>().rootCanvas;
+        RectTransform root = (RectTransform)canvas.transform;
+        Camera camera = canvas.renderMode == RenderMode.ScreenSpaceOverlay ?
+            null : canvas.worldCamera;
+        Vector2 screen = RectTransformUtility.WorldToScreenPoint(camera,
+            source.TransformPoint(source.rect.center));
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(root,
+            screen, camera, out Vector2 start);
+        inspectionFromTimeline = fromTimeline;
+
+        inspectionShade = Box("Fundo da inspeção", root, Color.clear, true);
+        Fill(inspectionShade, 0f, 0f);
+        Button backdrop = inspectionShade.GetComponent<Button>();
+        backdrop.transition = Selectable.Transition.None;
+        backdrop.onClick.AddListener(() => CloseInspection(false));
+        inspectionCard = Box("Carta em inspeção", root, Color.white, false);
+        inspectionCard.anchorMin = inspectionCard.anchorMax = new Vector2(0.5f, 0.5f);
+        inspectionCard.pivot = new Vector2(0.5f, 0.5f);
+        inspectionCard.sizeDelta = source.rect.size;
+        inspectionCard.anchoredPosition = start;
+        inspectionCard.localScale = source.localScale;
+        Image original = source.GetComponent<Image>();
+        Image image = inspectionCard.GetComponent<Image>();
+        image.sprite = original.sprite;
+        image.color = original.color;
+        image.preserveAspect = true;
+        if (image.sprite == null || image.sprite.name.Contains("9-SlicedBox"))
+            Label(cardName, inspectionCard, 16, new Color(0.55f, 0.1f, 0.1f));
+        float gap = Mathf.Max(32f,
+            hand != null ? hand.InspectionDescriptionGap : 18f);
+        float panelWidth = Mathf.Clamp(root.rect.width * 0.24f, 240f, 390f);
+        float panelHeight = Mathf.Clamp(root.rect.height * 0.27f, 140f, 260f);
+        float scale = Mathf.Min(root.rect.width * 0.38f / source.rect.width,
+            root.rect.height * 0.68f / source.rect.height);
+        float rightRoom = root.rect.width * 0.5f - panelWidth - gap - 16f;
+        scale = Mathf.Min(scale, Mathf.Max(1f, rightRoom * 2f /
+            source.rect.width));
+        scale = Mathf.Max(1f, scale);
+        RectTransform template = hand != null ? hand.InspectionDescriptionTemplate : null;
+        if (template != null)
+        {
+            inspectionDescription = Instantiate(template, root, false);
+            inspectionDescription.name = "Descrição da inspeção";
+            inspectionDescription.gameObject.SetActive(true);
+            inspectionDescription.anchorMin = inspectionDescription.anchorMax =
+                new Vector2(0.5f, 0.5f);
+            inspectionDescription.pivot = new Vector2(0f, 0.5f);
+            inspectionDescription.sizeDelta = new Vector2(panelWidth, panelHeight);
+            float panelX = source.rect.width * scale * 0.5f + gap;
+            inspectionDescription.anchoredPosition = new Vector2(panelX + 16f, 0f);
+            inspectionDescription.GetComponent<Image>().raycastTarget = false;
+            CanvasGroup panelGroup = inspectionDescription.GetComponent<CanvasGroup>();
+            if (panelGroup == null)
+                panelGroup = inspectionDescription.gameObject.AddComponent<CanvasGroup>();
+            panelGroup.alpha = 0f;
+            panelGroup.interactable = panelGroup.blocksRaycasts = false;
+            Text text = inspectionDescription.GetComponentInChildren<Text>(true);
+            if (text != null)
+            {
+                text.text = string.IsNullOrWhiteSpace(description) ?
+                    "Sem descrição desta carta." : description;
+                text.fontSize = 18;
+                text.resizeTextForBestFit = true;
+                text.resizeTextMinSize = 13;
+                text.alignment = TextAnchor.MiddleLeft;
+                RectTransform textRect = text.rectTransform;
+                textRect.anchorMin = Vector2.zero;
+                textRect.anchorMax = Vector2.one;
+                textRect.offsetMin = new Vector2(16f, 14f);
+                textRect.offsetMax = new Vector2(-16f, -14f);
+            }
+        }
+        inspectionSource = source.GetComponent<CanvasGroup>();
+        if (inspectionSource == null)
+            inspectionSource = source.gameObject.AddComponent<CanvasGroup>();
+        inspectionSource.alpha = 0f;
+        if (!fromTimeline)
+        {
+            source.GetComponent<ActivityCardDrag>()?.EndHoverForInspection();
+            hand?.SuspendHoverForInspection();
+        }
+        if (fromTimeline) scroll.enabled = false;
+        inspectionTween = DOTween.Sequence()
+            .Join(inspectionShade.GetComponent<Image>().DOFade(0.52f, 0.38f))
+            .Join(inspectionCard.DOAnchorPos(Vector2.zero, 0.45f)
+                .SetEase(Ease.OutCubic))
+            .Join(inspectionCard.DOScale(scale, 0.45f)
+                .SetEase(Ease.OutBack))
+            .Join(inspectionCard.DOLocalRotate(Vector3.zero, 0.45f))
+            .OnComplete(() =>
+            {
+                TimelineCardInspection inspection =
+                    inspectionCard.gameObject.AddComponent<TimelineCardInspection>();
+                inspection.Configure(inspectionTilt, inspectionShift,
+                    inspectionFollowSpeed);
+                inspection.Begin(canvas);
+            });
+        if (inspectionDescription != null)
+        {
+            float panelX = inspectionDescription.anchoredPosition.x - 16f;
+            inspectionTween.Join(inspectionDescription.DOAnchorPosX(panelX, 0.38f)
+                .SetEase(Ease.OutCubic));
+            inspectionTween.Join(inspectionDescription.GetComponent<CanvasGroup>()
+                .DOFade(1f, 0.3f));
+        }
+    }
+
+    private void CloseInspection(bool immediate)
+    {
+        if (inspectionCard == null) return;
+        inspectionTween?.Kill();
+        inspectionCard.DOKill();
+        inspectionShade.GetComponent<Image>().DOKill();
+        TimelineCardInspection tilt = inspectionCard.GetComponent<TimelineCardInspection>();
+        if (tilt != null) tilt.Stop();
+        RectTransform card = inspectionCard;
+        RectTransform shade = inspectionShade;
+        RectTransform descriptionPanel = inspectionDescription;
+        CanvasGroup source = inspectionSource;
+        inspectionCard = inspectionShade = null;
+        inspectionDescription = null;
+        inspectionSource = null;
+        bool fromTimeline = inspectionFromTimeline;
+        inspectionFromTimeline = false;
+        if (fromTimeline) scroll.enabled = true;
+        void Finish()
+        {
+            if (source != null) source.alpha = 1f;
+            if (card != null) Destroy(card.gameObject);
+            if (shade != null) Destroy(shade.gameObject);
+            if (descriptionPanel != null) Destroy(descriptionPanel.gameObject);
+        }
+        if (immediate || source == null || !source.gameObject.activeInHierarchy ||
+            (fromTimeline && !open))
+        {
+            Finish();
+            return;
+        }
+        Canvas canvas = GetComponent<Canvas>().rootCanvas;
+        RectTransform root = (RectTransform)canvas.transform;
+        Camera camera = canvas.renderMode == RenderMode.ScreenSpaceOverlay ?
+            null : canvas.worldCamera;
+        RectTransform target = (RectTransform)source.transform;
+        Vector2 screen = RectTransformUtility.WorldToScreenPoint(camera,
+            target.TransformPoint(target.rect.center));
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(root,
+            screen, camera, out Vector2 destination);
+        inspectionTween = DOTween.Sequence()
+            .Join(card.DOAnchorPos(destination, 0.32f).SetEase(Ease.InOutCubic))
+            .Join(card.DOScale(1f, 0.32f).SetEase(Ease.InCubic))
+            .Join(card.DOLocalRotate(Vector3.zero, 0.25f))
+            .Join(shade.GetComponent<Image>().DOFade(0f, 0.32f))
+            .OnComplete(Finish);
+        if (descriptionPanel != null)
+            inspectionTween.Join(descriptionPanel.GetComponent<CanvasGroup>()
+                .DOFade(0f, 0.2f));
     }
 
     private static RectTransform Empty(string name, Transform parent)

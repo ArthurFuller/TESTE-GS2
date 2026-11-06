@@ -13,7 +13,8 @@ public sealed class ShopSellPanel : MonoBehaviour
     private static readonly SaleItem[] Items =
     {
         SaleItem.Wood, SaleItem.Fish, SaleItem.Corn,
-        SaleItem.Pumpkin, SaleItem.Food, SaleItem.Jerimum
+        SaleItem.Pumpkin, SaleItem.Food, SaleItem.Jerimum,
+        SaleItem.Milk, SaleItem.Eggs
     };
 
     private void Awake()
@@ -50,7 +51,7 @@ public sealed class ShopSellPanel : MonoBehaviour
     public void Sell()
     {
         if (trading == null || rows == null || rows.Length != Items.Length) return;
-        int[] quantities = new int[9];
+        int[] quantities = new int[(int)SaleItem.Eggs + 1];
         for (int i = 0; i < rows.Length; i++)
             quantities[(int)Items[i]] = rows[i] == null ? 0 : rows[i].Quantity;
         long coins = 0;

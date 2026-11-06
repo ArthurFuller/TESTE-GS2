@@ -24,6 +24,13 @@ public sealed class ResourceCounterHover : MonoBehaviour
     private int hovered = -1;
     private Camera uiCamera;
 
+    public Graphic IconFor(ResourceKind kind)
+    {
+        int index = (int)kind;
+        return counters != null && index < counters.Length && counters[index].icon != null
+            ? counters[index].icon.GetComponent<Graphic>() : null;
+    }
+
     private void Awake()
     {
         if (counters == null) return;

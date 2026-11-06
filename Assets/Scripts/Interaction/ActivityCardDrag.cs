@@ -46,15 +46,41 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     private float lastPointerMove;
     private Vector2 previousPointer;
     private bool waitingForTarget;
+    private SeedCatalog seedCatalog;
+    private InventoryTrading trading;
     private ActivityCardAvailability Hand => transform.parent != null ?
         transform.parent.GetComponentInChildren<ActivityCardAvailability>(true) : null;
 
     public ActivityKind Kind => activity;
     public string DisplayName => activityName;
-    public string Description => description;
+    public string Description
+    {
+        get
+        {
+            CropType crop = activity switch
+            {
+                ActivityKind.PlantCorn => CropType.Corn,
+                ActivityKind.PlantPumpkin => CropType.Pumpkin,
+                ActivityKind.PlantJerimum => CropType.Jerimum,
+                _ => CropType.None
+            };
+            if (crop == CropType.None) return description;
+            if (seedCatalog == null) seedCatalog = FindFirstObjectByType<SeedCatalog>();
+            if (trading == null) trading = FindFirstObjectByType<InventoryTrading>();
+            CropSettings settings = seedCatalog != null ? seedCatalog.Get(crop) : null;
+            if (settings == null || trading == null) return description;
+            SaleItem item = crop == CropType.Corn ? SaleItem.Corn :
+                crop == CropType.Pumpkin ? SaleItem.Pumpkin : SaleItem.Jerimum;
+            return "Plante em terreno arado. Cresce em " + settings.growthDays +
+                (settings.growthDays == 1 ? " dia" : " dias") + ", rende " +
+                settings.foodYield + " por colheita e vende por " +
+                trading.GetPrice(item) + " moedas/un.";
+        }
+    }
     public bool HasEffect => true;
     public bool IsReturning => returning;
     public bool IsDragging => dragging;
+    public void EndHoverForInspection() => RestoreHover(true);
     public bool IsReplayAnimating => replayAnimating;
     public void ResetHoverForSelection() => RestoreHover(true);
 
@@ -438,22 +464,16 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
                 });
             return;
         }
-        if (eventData.dragging || activity != ActivityKind.BuildHouse) return;
-        RestoreHover(true);
-        RectTransform clickedCard = (RectTransform)transform;
-        originalPosition = clickedCard.anchoredPosition;
-        originalScale = clickedCard.localScale;
-        homeRotation = clickedCard.localRotation;
-        homePivot = clickedCard.pivot;
-        dragSibling = clickedCard.GetSiblingIndex();
-        WorkerAssignment worker = WorkerAssignment.Selected;
-        if (worker != null) worker.TryAssign(activity, activityName, this);
+        if (!eventData.dragging && !dragging && !returning &&
+            eventData.button == PointerEventData.InputButton.Left)
+            Hand?.InspectCard(this);
     }
 
     public void OnBeginDrag(PointerEventData eventData)
     {
         if (!HasEffect || activity == ActivityKind.BuySeeds || returning) return;
         if (Hand != null && Hand.IsSelectionLocked) return;
+        GetComponent<CardHoverOutline>()?.SetHighlighted(false);
         Hand?.ClosePopupsForDrag();
         RestoreHover(true);
         RectTransform rect = (RectTransform)transform;

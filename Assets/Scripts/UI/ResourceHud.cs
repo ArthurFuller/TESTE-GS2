@@ -44,11 +44,11 @@ public sealed class ResourceHud : MonoBehaviour
     private RectTransform canvasRect;
     private Texture2D circleTexture;
     private Sprite circleSprite;
-    private int observedCoins;
-    private int coinLossRemaining;
-    private Tween coinLossTween;
-    private Tween coinFlashTween;
-    private Color normalCoinColor;
+    private readonly int[] displayed = new int[9];
+    private readonly Tween[] counterTweens = new Tween[9];
+    private readonly Color[] textColors = new Color[9];
+    private readonly Color[] iconColors = new Color[9];
+    private ResourceCounterHover counterHover;
 
     private Camera UiCamera => canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
         ? canvas.worldCamera : null;
@@ -62,8 +62,16 @@ public sealed class ResourceHud : MonoBehaviour
 
     private void OnEnable()
     {
-        observedCoins = resources != null ? resources.Coins : 0;
-        if (coinText != null) normalCoinColor = coinText.color;
+        counterHover = GetComponent<ResourceCounterHover>();
+        for (int i = 0; i < displayed.Length; i++)
+        {
+            ResourceKind kind = (ResourceKind)i;
+            displayed[i] = Stored(kind);
+            Text label = TargetFor(kind);
+            Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
+            if (label != null) textColors[i] = label.color;
+            if (icon != null) iconColors[i] = icon.color;
+        }
         if (resources != null) resources.Changed += Refresh;
         Refresh();
     }
@@ -72,10 +80,14 @@ public sealed class ResourceHud : MonoBehaviour
     {
         if (resources != null) resources.Changed -= Refresh;
         DOTween.Kill(this);
-        coinLossTween?.Kill();
-        coinFlashTween?.Kill();
-        if (coinText != null) coinText.color = normalCoinColor;
-        coinLossRemaining = 0;
+        for (int i = 0; i < displayed.Length; i++)
+        {
+            ResourceKind kind = (ResourceKind)i;
+            Text label = TargetFor(kind);
+            Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
+            if (label != null) { label.DOKill(); label.color = textColors[i]; }
+            if (icon != null) { icon.DOKill(); icon.color = iconColors[i]; }
+        }
         System.Array.Clear(inFlight, 0, inFlight.Length);
     }
 
@@ -300,47 +312,77 @@ public sealed class ResourceHud : MonoBehaviour
         _ => animalText
     };
 
-    private int Shown(ResourceKind kind, int stored) => Mathf.Max(0, stored - inFlight[(int)kind]);
-
-    private void StepCoinLoss()
+    private int Stored(ResourceKind kind) => resources == null ? 0 : kind switch
     {
-        if (coinLossRemaining <= 0)
+        ResourceKind.Wood => resources.Wood,
+        ResourceKind.Fish => resources.Fish,
+        ResourceKind.Corn => resources.Corn,
+        ResourceKind.Pumpkin => resources.Pumpkin,
+        ResourceKind.Jerimum => resources.Jerimum,
+        ResourceKind.Food => resources.Food,
+        ResourceKind.Coins => resources.Coins,
+        ResourceKind.Milk => resources.Milk,
+        ResourceKind.Eggs => resources.Eggs,
+        _ => 0
+    };
+
+    private int Shown(ResourceKind kind) => Mathf.Max(0, Stored(kind) - inFlight[(int)kind]);
+
+    private void StepCounter(ResourceKind kind)
+    {
+        int index = (int)kind;
+        int target = Shown(kind);
+        if (displayed[index] == target) { counterTweens[index] = null; return; }
+        int direction = target > displayed[index] ? 1 : -1;
+        displayed[index] += direction;
+        DrawCounter(kind);
+        FlashCounter(kind, direction);
+        counterTweens[index] = DOVirtual.DelayedCall(0.075f, () => StepCounter(kind))
+            .SetTarget(this);
+    }
+
+    private void FlashCounter(ResourceKind kind, int direction)
+    {
+        int index = (int)kind;
+        Color flash = direction < 0 ? new Color(0.95f, 0.14f, 0.14f) :
+            new Color(0.31f, 0.76f, 0.32f);
+        Text label = TargetFor(kind);
+        Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
+        if (label != null)
         {
-            coinFlashTween?.Kill();
-            if (coinText != null) coinText.color = normalCoinColor;
-            return;
+            label.DOKill();
+            label.color = flash;
+            label.DOColor(textColors[index], 0.14f);
         }
-        coinLossRemaining--;
-        Refresh();
-        coinLossTween = DOVirtual.DelayedCall(0.075f, StepCoinLoss).SetTarget(this);
+        if (icon != null)
+        {
+            icon.DOKill();
+            icon.color = new Color(flash.r, flash.g, flash.b, iconColors[index].a);
+            icon.DOColor(iconColors[index], 0.14f);
+        }
+    }
+
+    private void DrawCounter(ResourceKind kind)
+    {
+        Text label = TargetFor(kind);
+        if (label == null) return;
+        if (eggText == null && (kind == ResourceKind.Milk || kind == ResourceKind.Eggs))
+            label.text = displayed[(int)ResourceKind.Milk] + "  Ovos: " +
+                displayed[(int)ResourceKind.Eggs];
+        else label.text = displayed[(int)kind].ToString();
     }
 
     private void Refresh()
     {
         if (resources == null) return;
-        if (resources.Coins < observedCoins && coinText != null)
+        for (int i = 0; i < displayed.Length; i++)
         {
-            coinLossRemaining += observedCoins - resources.Coins;
-            if (coinLossTween == null || !coinLossTween.IsActive())
-            {
-                coinFlashTween?.Kill();
-                coinText.color = normalCoinColor;
-                coinFlashTween = coinText.DOColor(new Color(0.95f, 0.14f, 0.14f), 0.09f)
-                    .SetLoops(-1, LoopType.Yoyo);
-                coinLossTween = DOVirtual.DelayedCall(0.075f, StepCoinLoss).SetTarget(this);
-            }
+            ResourceKind kind = (ResourceKind)i;
+            DrawCounter(kind);
+            if (displayed[i] != Shown(kind) &&
+                (counterTweens[i] == null || !counterTweens[i].IsActive()))
+                counterTweens[i] = DOVirtual.DelayedCall(0.075f, () => StepCounter(kind))
+                    .SetTarget(this);
         }
-        observedCoins = resources.Coins;
-        if (woodText != null) woodText.text = Shown(ResourceKind.Wood, resources.Wood).ToString();
-        if (fishText != null) fishText.text = Shown(ResourceKind.Fish, resources.Fish).ToString();
-        if (cassavaText != null) cassavaText.text = Shown(ResourceKind.Pumpkin, resources.Pumpkin).ToString();
-        if (pumpkinText != null) pumpkinText.text = Shown(ResourceKind.Jerimum, resources.Jerimum).ToString();
-        if (cornText != null) cornText.text = Shown(ResourceKind.Corn, resources.Corn).ToString();
-        if (foodText != null) foodText.text = Shown(ResourceKind.Food, resources.Food).ToString();
-        if (coinText != null) coinText.text =
-            Mathf.Max(0, Shown(ResourceKind.Coins, resources.Coins) + coinLossRemaining).ToString();
-        if (animalText != null) animalText.text = Shown(ResourceKind.Milk, resources.Milk) +
-            (eggText == null ? "  Ovos: " + Shown(ResourceKind.Eggs, resources.Eggs) : "");
-        if (eggText != null) eggText.text = Shown(ResourceKind.Eggs, resources.Eggs).ToString();
     }
 }

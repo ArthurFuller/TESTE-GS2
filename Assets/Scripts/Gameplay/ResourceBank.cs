@@ -115,7 +115,9 @@ public sealed class ResourceBank : MonoBehaviour
 
     public bool TrySellBatch(int[] quantities, int[] prices)
     {
-        if (quantities == null || prices == null || quantities.Length != 9 || prices.Length != 9) return false;
+        int itemCount = (int)SaleItem.Eggs + 1;
+        if (quantities == null || prices == null || quantities.Length != itemCount ||
+            prices.Length != itemCount) return false;
         if (quantities[(int)SaleItem.CornSeeds] != 0 ||
             quantities[(int)SaleItem.PumpkinSeeds] != 0 ||
             quantities[(int)SaleItem.JerimumSeeds] != 0) return false;
@@ -136,6 +138,8 @@ public sealed class ResourceBank : MonoBehaviour
         Pumpkin -= quantities[(int)SaleItem.Pumpkin];
         RemoveFood(quantities[(int)SaleItem.Food]);
         Jerimum -= quantities[(int)SaleItem.Jerimum];
+        Milk -= quantities[(int)SaleItem.Milk];
+        Eggs -= quantities[(int)SaleItem.Eggs];
         Coins += (int)total;
         Changed?.Invoke();
         return true;
@@ -151,7 +155,10 @@ public sealed class ResourceBank : MonoBehaviour
         SaleItem.CornSeeds => CornSeeds,
         SaleItem.PumpkinSeeds => PumpkinSeeds,
         SaleItem.Jerimum => Jerimum,
-        _ => JerimumSeeds
+        SaleItem.JerimumSeeds => JerimumSeeds,
+        SaleItem.Milk => Milk,
+        SaleItem.Eggs => Eggs,
+        _ => 0
     };
 
     public int ConsumeFood(int amount)

@@ -14,31 +14,38 @@ public sealed class DayTimelineEditor : Editor
         float cardHeight = serializedObject.FindProperty("cardHeight").floatValue;
         float cardGap = serializedObject.FindProperty("cardGap").floatValue;
         float lineHeight = serializedObject.FindProperty("cardLineHeight").floatValue;
+        float overlap = serializedObject.FindProperty("cardOverlap").floatValue;
+        float pegSize = serializedObject.FindProperty("pegSize").floatValue;
         float startX = serializedObject.FindProperty("cardStartX").floatValue;
         float topInset = serializedObject.FindProperty("cardTopInset").floatValue;
         float lineOffsetY = serializedObject.FindProperty("cardLineOffsetY").floatValue;
 
         EditorGUILayout.Space(8f);
-        EditorGUILayout.LabelField("Prévia das cartas e da ligação", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Prévia do varal", EditorStyles.boldLabel);
         Rect area = GUILayoutUtility.GetRect(10f, 150f, GUILayout.ExpandWidth(true));
         EditorGUI.DrawRect(area, new Color(0.16f, 0.16f, 0.15f));
 
-        float widthNeeded = startX + cardWidth * 2f + cardGap + 12f;
-        float heightNeeded = topInset + cardHeight + Mathf.Abs(lineOffsetY) + 12f;
+        float stride = Mathf.Max(12f, cardWidth + cardGap - overlap);
+        float widthNeeded = startX + cardWidth + stride + 12f;
+        float heightNeeded = topInset + pegSize * 0.5f + cardHeight + 12f;
         float scale = Mathf.Min(1f, (area.width - 8f) / widthNeeded,
             (area.height - 8f) / heightNeeded);
         float left = area.x + 4f + startX * scale;
-        float top = area.y + 4f + topInset * scale;
+        float top = area.y + 4f + (topInset + pegSize * 0.5f) * scale;
         float width = cardWidth * scale;
         float height = cardHeight * scale;
-        float gap = cardGap * scale;
-        float lineY = top + height * 0.5f - lineOffsetY * scale;
-        EditorGUI.DrawRect(new Rect(left + width * 0.5f, lineY - lineHeight * scale * 0.5f,
-            (cardWidth + cardGap) * scale, Mathf.Max(1f, lineHeight * scale)),
+        float lineY = top - pegSize * 0.35f * scale - lineOffsetY * scale;
+        EditorGUI.DrawRect(new Rect(left, lineY - lineHeight * scale * 0.5f,
+            (cardWidth + stride) * scale, Mathf.Max(1f, lineHeight * scale)),
             new Color(0.67f, 0.59f, 0.43f));
 
         DrawCard(new Rect(left, top, width, height), "CARTA 1");
-        DrawCard(new Rect(left + width + gap, top, width, height), "CARTA 2");
+        DrawCard(new Rect(left + stride * scale, top, width, height), "CARTA 2");
+        float pin = pegSize * scale;
+        EditorGUI.DrawRect(new Rect(left + (width - pin) * 0.5f, top - pin * 0.5f,
+            pin, pin), new Color(0.16f, 0.15f, 0.12f));
+        EditorGUI.DrawRect(new Rect(left + stride * scale + (width - pin) * 0.5f,
+            top - pin * 0.5f, pin, pin), new Color(0.16f, 0.15f, 0.12f));
         EditorGUILayout.HelpBox("A prévia mostra as proporções. Durante o Play Mode, " +
             "alterações nos campos das cartas atualizam a aba aberta e são salvas na cena " +
             "ao sair do Play Mode.",

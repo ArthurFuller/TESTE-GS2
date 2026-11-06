@@ -21,10 +21,10 @@ public sealed class SeedMerchant : MonoBehaviour
     [SerializeField] private ActivityCardAvailability hand;
     [SerializeField] private HouseSite houseSite;
     [SerializeField] private HouseSite secondHouseSite;
-    [SerializeField, Min(0)] private int fenceWoodCost = 6;
+    [SerializeField, Min(0)] private int fenceWoodCost = 4;
     [SerializeField, Min(0)] private int fenceCoinCost = 8;
-    [SerializeField, Min(0)] private int houseWoodCost = 16;
-    [SerializeField, Min(0)] private int houseCoinCost = 16;
+    [SerializeField, Min(0)] private int houseWoodCost = 8;
+    [SerializeField, Min(0)] private int houseCoinCost = 30;
     [SerializeField] private int[] marketDays = { 1, 3, 5, 7, 9, 11 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;

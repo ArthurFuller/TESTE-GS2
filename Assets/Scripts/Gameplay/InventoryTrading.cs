@@ -26,13 +26,15 @@ public sealed class InventoryTrading : MonoBehaviour
     [Header("Preços provisórios por unidade")]
     [SerializeField, Min(0)] private int woodPrice = 1;
     [SerializeField, Min(0)] private int fishPrice = 2;
-    [SerializeField, Min(0)] private int cornPrice = 1;
-    [SerializeField, Min(0)] private int pumpkinPrice = 2;
+    [SerializeField, Min(0)] private int cornPrice = 4;
+    [SerializeField, Min(0)] private int pumpkinPrice = 1;
     [SerializeField, Min(0)] private int foodPrice = 1;
     [SerializeField, Min(0)] private int cornSeedPrice = 1;
     [SerializeField, Min(0)] private int pumpkinSeedPrice = 2;
-    [SerializeField, Min(0)] private int jerimumPrice = 2;
+    [SerializeField, Min(0)] private int jerimumPrice = 3;
     [SerializeField, Min(0)] private int jerimumSeedPrice = 2;
+    [SerializeField, Min(0)] private int milkPrice = 2;
+    [SerializeField, Min(0)] private int eggPrice = 2;
     [Header("Receitas de comida")]
     [SerializeField] private FoodRecipe[] recipes = Array.Empty<FoodRecipe>();
     [SerializeField, Min(1), InspectorName("Multiplicador Comida+")] private int foodPlusMultiplier = 2;
@@ -47,7 +49,10 @@ public sealed class InventoryTrading : MonoBehaviour
         SaleItem.Food => resources.Food,
         SaleItem.CornSeeds => resources.CornSeeds,
         SaleItem.PumpkinSeeds => resources.PumpkinSeeds,
-        _ => resources.JerimumSeeds
+        SaleItem.JerimumSeeds => resources.JerimumSeeds,
+        SaleItem.Milk => resources.Milk,
+        SaleItem.Eggs => resources.Eggs,
+        _ => 0
     };
 
     public int GetPrice(SaleItem item) => item switch
@@ -60,7 +65,10 @@ public sealed class InventoryTrading : MonoBehaviour
         SaleItem.Food => foodPrice,
         SaleItem.CornSeeds => cornSeedPrice,
         SaleItem.PumpkinSeeds => pumpkinSeedPrice,
-        _ => jerimumSeedPrice
+        SaleItem.JerimumSeeds => jerimumSeedPrice,
+        SaleItem.Milk => milkPrice,
+        SaleItem.Eggs => eggPrice,
+        _ => 0
     };
 
     public bool TrySellBatch(int[] quantities)
@@ -70,7 +78,7 @@ public sealed class InventoryTrading : MonoBehaviour
             if (feedback != null) feedback.ShowMessage("Visite a barraca aberta para vender.");
             return false;
         }
-        int[] prices = new int[9];
+        int[] prices = new int[(int)SaleItem.Eggs + 1];
         for (int i = 0; i < prices.Length; i++) prices[i] = GetPrice((SaleItem)i);
         if (!resources.TrySellBatch(quantities, prices))
         {

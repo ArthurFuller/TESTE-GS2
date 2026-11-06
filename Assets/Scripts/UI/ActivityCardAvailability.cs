@@ -6,7 +6,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler,
-    IBeginDragHandler, IDragHandler, IEndDragHandler, ICanvasRaycastFilter
+    IPointerClickHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, ICanvasRaycastFilter
 {
     [SerializeField] private ActivityCardDrag[] cards;
     [SerializeField] private ActivityCardDrag[] cardPrefabs;
@@ -71,6 +71,20 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         pendingRewards.Count + testCards.Count);
     public bool ContainsCard(ActivityCardDrag card) => shown.Contains(card);
     public bool IsSelectionLocked => selectionLocked;
+    public RectTransform InspectionDescriptionTemplate => descriptionPanel;
+    public float InspectionDescriptionGap => descriptionGap;
+    public void InspectCard(ActivityCardDrag card)
+    {
+        if (card == null || !shown.Contains(card) || selectionLocked ||
+            entranceSuspended || dragging != null || card.IsReturning ||
+            timeline == null) return;
+        timeline.InspectHandCard(card);
+    }
+    public void SuspendHoverForInspection()
+    {
+        pointerInside = false;
+        ClearHover(true);
+    }
     public void ClosePopupsForDrag()
     {
         if (timeline != null) timeline.ClosePanel();
@@ -110,6 +124,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (actions != null) actions.PendingSelectionChanged += SetSelectionLocked;
         if (dayCycle == null) dayCycle = FindFirstObjectByType<DayCycle>();
         if (dayCycle != null) dayCycle.DayChanged += OnDayChanged;
+        if (descriptionPanel != null) descriptionPanel.gameObject.SetActive(false);
         Refresh();
     }
 
@@ -558,10 +573,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         normalScale = Mathf.Max(0.01f, normalScale);
         edgeY = Mathf.Max(padding, cardBaseY) + maxCardWidth * normalScale * Mathf.Sin(radians) * 0.5f;
         edgeY = Mathf.Min(edgeY, Mathf.Max(padding, availableHeight - padding - maxCardHeight * normalScale));
-        float descriptionRoom = descriptionPanel == null ? 0f : descriptionPanel.rect.height + descriptionGap;
-        if (descriptionRoom + maxCardHeight * normalScale + padding * 2f > availableHeight)
-            descriptionRoom = 0f;
-        float riseLimit = availableHeight - padding - descriptionRoom - hoverLift -
+        float riseLimit = availableHeight - padding - hoverLift -
             edgeY - maxCardHeight * normalScale;
         float width = Mathf.Min(handWidth, availableWidth - 2f * padding);
         float halfSpan = Mathf.Max(1f, (width - rotatedWidth * normalScale) * 0.5f);
@@ -679,6 +691,13 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         if (dragging == null) ClearHover(false);
     }
 
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (eventData.button != PointerEventData.InputButton.Left ||
+            eventData.dragging || dragging != null || selectionLocked) return;
+        InspectCard(CardAt(eventData.position, eventData.pressEventCamera));
+    }
+
     private void SetHover(ActivityCardDrag card)
     {
         if (selectionLocked) return;
@@ -687,50 +706,28 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         hovered = card;
         if (hovered == null) return;
         RectTransform rect = hovered.GetComponent<RectTransform>();
+        CardHoverOutline.Ensure(rect)?.SetHighlighted(true);
         rect.SetAsLastSibling();
         int index = shown.IndexOf(hovered);
         MoveNeighbours(index, true);
         float padding = containerPadding;
-        float descriptionRoom = descriptionPanel == null ? 0f : descriptionPanel.rect.height + descriptionGap;
-        if (descriptionRoom + rect.rect.height * normalScale + padding * 2f > availableHeight)
-            descriptionRoom = 0f;
         float scale = normalScale * Mathf.Min(hoverScale,
             (availableWidth - 2f * padding) / (rect.rect.width * normalScale),
-            (availableHeight - 2f * padding - descriptionRoom) / (rect.rect.height * normalScale));
+            (availableHeight - 2f * padding) / (rect.rect.height * normalScale));
         float top = Mathf.Max(padding + rect.rect.height * scale,
-            Mathf.Min(availableHeight - padding - descriptionRoom,
+            Mathf.Min(availableHeight - padding,
                 CardPosition(index).y + rect.rect.height * normalScale + hoverLift));
         float x = Mathf.Clamp(CardPosition(index).x,
             -availableWidth * 0.5f + padding + rect.rect.width * scale * 0.5f,
             availableWidth * 0.5f - padding - rect.rect.width * scale * 0.5f);
         AnimateCard(rect, new Vector2(x, top - rect.rect.height * scale), scale, 0f, false);
-        if (descriptionPanel == null || descriptionText == null || descriptionRoom == 0f) return;
-        descriptionText.text = hovered.Description;
-        descriptionPanel.DOKill();
-        CanvasGroup group = descriptionPanel.GetComponent<CanvasGroup>();
-        if (group != null) group.DOKill();
-        float tooltipX = Mathf.Clamp(x,
-            -availableWidth * 0.5f + padding + descriptionPanel.rect.width * 0.5f,
-            availableWidth * 0.5f - padding - descriptionPanel.rect.width * 0.5f);
-        Vector2 target = new Vector2(tooltipX, top + descriptionGap);
-        descriptionPanel.anchoredPosition = target - Vector2.up * 8f;
-        descriptionPanel.gameObject.SetActive(!string.IsNullOrWhiteSpace(hovered.Description));
-        descriptionPanel.SetAsLastSibling();
-        if (descriptionPanel.gameObject.activeSelf)
-        {
-            descriptionPanel.DOAnchorPos(target, hoverDuration).SetEase(Ease.OutCubic);
-            if (group != null)
-            {
-                group.alpha = 0f;
-                group.DOFade(1f, hoverDuration);
-            }
-        }
     }
 
     private void ClearHover(bool immediate)
     {
         if (hovered == null) return;
         RectTransform rect = hovered.GetComponent<RectTransform>();
+        hovered.GetComponent<CardHoverOutline>()?.SetHighlighted(false);
         if (descriptionPanel != null)
         {
             descriptionPanel.DOKill();

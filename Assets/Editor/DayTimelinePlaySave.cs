@@ -23,8 +23,10 @@ public static class DayTimelinePlaySave
         "panelWidth", "daysHeight", "cardsHeight", "topBarHeight",
         "dayButtonWidth", "dayButtonHeight", "dayLineHeight",
         "cardWidth", "cardHeight", "cardGap", "cardLineHeight",
+        "cardOverlap", "pegSize", "hangingAngle", "cardHoverScale",
         "cardStartX", "cardTopInset", "cardLineOffsetY",
-        "slideDuration", "waveDelay"
+        "slideDuration", "waveDelay",
+        "inspectionTilt", "inspectionShift", "inspectionFollowSpeed"
     };
 
     static DayTimelinePlaySave()
@@ -57,7 +59,8 @@ public static class DayTimelinePlaySave
         DayTimeline timeline = previous != null ? FindTimeline(previous.scenePath) : null;
         if (timeline == null) return;
         Settings current = Capture(timeline);
-        if (previous.totalDays != current.totalDays)
+        if (previous.values == null || previous.values.Length != Fields.Length ||
+            previous.totalDays != current.totalDays)
         {
             RecordCurrent(timeline);
             return;
@@ -87,9 +90,12 @@ public static class DayTimelinePlaySave
             DayTimeline timeline = original != null ? FindTimeline(original.scenePath) : null;
             if (timeline == null) return;
             Settings current = Capture(timeline);
-            current.changed = original.totalDays != current.totalDays;
+            current.changed = original.values == null ||
+                original.values.Length != Fields.Length ||
+                original.totalDays != current.totalDays;
             for (int i = 0; i < Fields.Length; i++)
-                if (!Mathf.Approximately(original.values[i], current.values[i]))
+                if (original.values != null && i < original.values.Length &&
+                    !Mathf.Approximately(original.values[i], current.values[i]))
                     current.changed = true;
             SessionState.SetString(Key, JsonUtility.ToJson(current));
         }
@@ -137,7 +143,8 @@ public static class DayTimelinePlaySave
 
         var destination = new SerializedObject(timeline);
         destination.FindProperty("totalDays").intValue = settings.totalDays;
-        for (int i = 0; i < Fields.Length; i++)
+        for (int i = 0; settings.values != null &&
+            i < Fields.Length && i < settings.values.Length; i++)
             destination.FindProperty(Fields[i]).floatValue = settings.values[i];
         destination.ApplyModifiedPropertiesWithoutUndo();
         EditorSceneManager.MarkSceneDirty(scene);

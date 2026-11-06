@@ -135,6 +135,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         RefreshActionDots(true);
         coffeeActions++;
         coffeeExcludedActivity = LastActivity;
+        LastActivity = ActivityKind.Coffee;
     }
 
     public void ReplaceCoffeeWithReplay()
