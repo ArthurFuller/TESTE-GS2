@@ -11,6 +11,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     [SerializeField] private string workerName = "Trabalhador";
     [SerializeField] private ActionResolver actionResolver;
     [SerializeField] private WorkProgress workProgress;
+    [SerializeField] private ParticleSystem comadreDizzyPrefab;
 
     public static WorkerAssignment Selected { get; private set; }
     public bool UsedToday => IsUnavailableToday || actionsRemaining <= 0;
@@ -32,10 +33,17 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private ActivityKind? coffeeExcludedActivity;
     private readonly List<Transform> actionDots = new List<Transform>();
     private Transform actionDotsRoot;
+    private ParticleSystem comadreDizzy;
 
     private void Awake()
     {
         HomePosition = transform.position;
+        if (comadreDizzyPrefab != null)
+        {
+            comadreDizzy = Instantiate(comadreDizzyPrefab, transform, false);
+            comadreDizzy.name = "Tontura - Comadre Fulozinha";
+            comadreDizzy.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
         actionDotsRoot = new GameObject("Ações - " + workerName).transform;
         actionDotsRoot.SetParent(transform.parent, false);
         RefreshActionDots(false);
@@ -183,6 +191,11 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     {
         IsUnavailableToday = absenceDaysRemaining > 0;
         if (IsUnavailableToday) absenceDaysRemaining--;
+        if (comadreDizzy != null)
+        {
+            if (IsUnavailableToday) comadreDizzy.Play(true);
+            else comadreDizzy.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
         actionsRemaining = IsUnavailableToday ? 0 : 1 + nextDayExtraActions;
         RefreshActionDots(true);
         nextDayExtraActions = 0;
