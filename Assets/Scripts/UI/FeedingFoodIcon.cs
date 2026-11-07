@@ -5,6 +5,7 @@ using UnityEngine.UI;
 
 public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
+    [SerializeField] private Image itemImage;
     [SerializeField] private Text nameLabel;
     [SerializeField] private Text quantityLabel;
 
@@ -20,7 +21,7 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
     private void Awake()
     {
         rect = (RectTransform)transform;
-        image = GetComponent<Image>();
+        image = itemImage != null ? itemImage : GetComponent<Image>();
     }
 
     public void Configure(FeedingMinigame feedingGame, SaleItem kind, Sprite sprite, Font font)

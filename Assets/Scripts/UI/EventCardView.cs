@@ -122,6 +122,7 @@ public sealed class EventCardView : MonoBehaviour
         if (descriptionRect != null)
             descriptionRect.anchoredPosition = descriptionHomePosition + Vector2.left * descriptionSlideOffset;
         backdrop.gameObject.SetActive(true);
+        backdrop.transform.SetAsLastSibling();
         backdrop.alpha = 0;
         backdrop.blocksRaycasts = true;
         card.anchoredPosition = homePosition + Vector2.up * entranceOffset;

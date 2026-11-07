@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -26,6 +27,12 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
     [SerializeField] private Button deliverButton;
     [SerializeField] private Button nextButton;
     [SerializeField] private ActiveMissionsPanel activePanel;
+    [Header("Comunidade")]
+    [SerializeField] private ActivityCardAvailability hand;
+    [SerializeField] private Image communityFill;
+    [SerializeField] private Text communityLabel;
+    [SerializeField, Min(1)] private int deliveriesPerHouse = 2;
+    [SerializeField, Range(1, 3)] private int houseRewardLimit = 3;
     [SerializeField, Range(1, 5)] private int minimumOffers = 2;
     [SerializeField, Range(1, 5)] private int maximumOffers = 3;
     [SerializeField, Min(1)] private int campaignDays = 12;
@@ -37,6 +44,10 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
     private int selectedIndex;
     private int lastGeneratedDay;
     private bool marketOpen;
+    private int communityDeliveries;
+    private int housesRewarded;
+
+    private void Awake() => RefreshCommunity(false);
 
     public bool HasDeliveryDueOn(int day)
     {
@@ -122,8 +133,39 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
                 deliverButton.transform as RectTransform);
         if (feedback != null) feedback.ShowMessage("Entrega concluída! +" + mission.coinReward + " moedas.");
         missions.RemoveAt(index);
+        if (housesRewarded < houseRewardLimit)
+        {
+            communityDeliveries++;
+            if (communityDeliveries >= deliveriesPerHouse && hand != null &&
+                hand.AddCommunityHouseCard())
+            {
+                communityDeliveries = 0;
+                housesRewarded++;
+                if (feedback != null) feedback.ShowMessage("Comunidade: carta de casa recebida!");
+            }
+            RefreshCommunity(true);
+        }
         selectedIndex = Mathf.Clamp(selectedIndex, 0, Mathf.Max(0, missions.Count - 1));
         Refresh();
+    }
+
+    private void RefreshCommunity(bool animate)
+    {
+        float progress = housesRewarded >= houseRewardLimit ? 1f :
+            Mathf.Clamp01((float)communityDeliveries / deliveriesPerHouse);
+        if (communityFill != null)
+        {
+            communityFill.DOKill();
+            if (animate) communityFill.DOFillAmount(progress, 0.35f).SetEase(Ease.OutCubic);
+            else communityFill.fillAmount = progress;
+        }
+        if (communityLabel != null)
+        {
+            int remaining = deliveriesPerHouse - communityDeliveries;
+            communityLabel.text = housesRewarded >= houseRewardLimit ?
+                "CASAS LIBERADAS" :
+                "NOVA CASA EM " + remaining + (remaining == 1 ? " ENTREGA" : " ENTREGAS");
+        }
     }
 
     private void GenerateOffers()

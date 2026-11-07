@@ -92,6 +92,8 @@ public sealed class DayCycle : MonoBehaviour
         }
     }
     public event Action DayChanged;
+    public event Action DayClosing;
+    public event Action DayClosingCancelled;
 
     public void RegisterWorker(WorkerAssignment worker)
     {
@@ -129,17 +131,18 @@ public sealed class DayCycle : MonoBehaviour
         if (timeline != null) timeline.ClosePanel();
         if (activeMissionsPanel != null) activeMissionsPanel.Close();
         if (merchant != null && merchant.IsOpen) merchant.HideShop();
+        if (currentDay < totalDays && feedingGame == null)
+        {
+            feedback.ShowMessage("Minigame de alimentação não configurado.");
+            return;
+        }
+        DayClosing?.Invoke();
         if (currentDay >= totalDays)
         {
             feedingOpen = true;
             if (finishDayButton != null) finishDayButton.interactable = false;
             if (hand != null) hand.ExitForDay(() => ShowDaySummary(0, 0, 0, 0));
             else ShowDaySummary(0, 0, 0, 0);
-            return;
-        }
-        if (feedingGame == null)
-        {
-            feedback.ShowMessage("Minigame de alimentação não configurado.");
             return;
         }
         feedingOpen = true;
@@ -154,6 +157,7 @@ public sealed class DayCycle : MonoBehaviour
         feedingOpen = false;
         if (finishDayButton != null) finishDayButton.interactable = true;
         if (hand != null) hand.ReturnAfterCancelledDay();
+        DayClosingCancelled?.Invoke();
     }
 
     private void FinishFeeding(SaleItem?[] chosenFood)

@@ -19,7 +19,6 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField] private Text fishingVisitLabel;
     [SerializeField] private FoodPreparationPanel foodPreparationPanel;
     [SerializeField] private InventoryTrading inventoryTrading;
-    [SerializeField] private Transform foodPreparationDestination;
     [SerializeField, Min(0.01f)] private float foodPreparationDuration = 5f;
     [SerializeField] private WorkerAssignment[] workers;
     [SerializeField] private Transform forestDestination;
@@ -391,7 +390,7 @@ public sealed class ActionResolver : MonoBehaviour
 
     private void AssignFoodPreparation(WorkerAssignment worker, ActivityKind activity, ActivityCardDrag card)
     {
-        if (foodPreparationPanel == null || inventoryTrading == null || foodPreparationDestination == null)
+        if (foodPreparationPanel == null || inventoryTrading == null)
         {
             feedback.ShowMessage("Preparação de comida não configurada.");
             return;
@@ -402,13 +401,8 @@ public sealed class ActionResolver : MonoBehaviour
         AssignmentVersion++;
         pendingFoodPlus = activity == ActivityKind.FoodPlus;
         worker.Select();
-        worker.SetStatus("indo à bancada");
-        MoveWorker(worker, foodPreparationDestination.position, () =>
-        {
-            if (pendingFoodWorker != worker) return;
-            worker.SetStatus("escolha os ingredientes");
-            foodPreparationPanel.Show(pendingFoodPlus);
-        });
+        worker.SetStatus("escolha os ingredientes");
+        foodPreparationPanel.Show(pendingFoodPlus);
     }
 
     private void ClearPendingPlot()
@@ -652,21 +646,33 @@ public sealed class ActionResolver : MonoBehaviour
         }
         ActivityCardDrag card = pendingPlotCard;
         WorkerAssignment worker = TakePendingWorker();
+        var targets = plot.ConnectedPlotsFor(activity, dayCycle.CurrentDay, seedCatalog);
         CommitAction(worker, activity, activity.ToString(), card);
-        MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
+        ImproveNext(0);
+
+        void ImproveNext(int index)
         {
-            if (activity == ActivityKind.Fertilizer) plot.Fertilize();
-            else
+            if (index >= targets.Count)
             {
-                plot.AdvanceGrowth(1);
-                plot.RefreshGrowth(dayCycle.CurrentDay, seedCatalog);
+                worker.SetStatus(activity == ActivityKind.Fertilizer ? "plantação adubada" :
+                    "crescimento acelerado");
+                feedback.ShowMessage(activity == ActivityKind.Fertilizer ?
+                    "Adubo: produção dobrada na colheita." : "Plantação avançou um dia.");
+                SendWorkerHome(worker);
+                return;
             }
-            worker.SetStatus(activity == ActivityKind.Fertilizer ? "plantação adubada" :
-                "crescimento acelerado");
-            feedback.ShowMessage(activity == ActivityKind.Fertilizer ?
-                "Adubo: produção dobrada na colheita." : "Plantação avançou um dia.");
-            SendWorkerHome(worker);
-        });
+            Plot target = targets[index];
+            MoveAndWork(worker, target.WorkPosition, plowWorkDuration, () =>
+            {
+                if (activity == ActivityKind.Fertilizer) target.Fertilize();
+                else
+                {
+                    target.AdvanceGrowth(1);
+                    target.RefreshGrowth(dayCycle.CurrentDay, seedCatalog);
+                }
+                ImproveNext(index + 1);
+            });
+        }
     }
 
     private void PlowPlot(Plot plot)
@@ -769,7 +775,7 @@ public sealed class ActionResolver : MonoBehaviour
             (pendingFoodWorker.UsedToday &&
              (pendingFoodCard == null || pendingFoodCard.Kind != ActivityKind.Replay)) ||
             inventoryTrading == null ||
-            resources == null || foodPreparationDestination == null) return false;
+            resources == null) return false;
         if (!inventoryTrading.TryPrepare(fish, corn, pumpkin, jerimum, milk, eggs,
             pendingFoodPlus, out int preparedFood))
         {
@@ -787,7 +793,7 @@ public sealed class ActionResolver : MonoBehaviour
         {
             resources.AddFood(preparedFood);
             if (resourceHud != null) resourceHud.FlyFromWorld(ResourceKind.Food,
-                preparedFood, foodPreparationDestination.position + Vector3.up);
+                preparedFood, worker.transform.position + Vector3.up);
             FoodGainedToday += preparedFood;
             worker.SetStatus("comida preparada");
             feedback.ShowMessage("+" + preparedFood + " comida preparada");

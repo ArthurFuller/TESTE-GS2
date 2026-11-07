@@ -71,6 +71,16 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         pendingRewards.Count + testCards.Count);
     public bool ContainsCard(ActivityCardDrag card) => shown.Contains(card);
     public bool IsSelectionLocked => selectionLocked;
+    public bool IsDraggingCard
+    {
+        get
+        {
+            if (dragging != null) return true;
+            foreach (ActivityCardDrag card in shown)
+                if (card != null && card.IsDragging) return true;
+            return false;
+        }
+    }
     public RectTransform InspectionDescriptionTemplate => descriptionPanel;
     public float InspectionDescriptionGap => descriptionGap;
     public void InspectCard(ActivityCardDrag card)
@@ -439,6 +449,13 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 #endif
 
     public bool AddCard(ActivityKind kind) => AddCard(kind, true);
+
+    public bool AddCommunityHouseCard()
+    {
+        if (TemplateFor(ActivityKind.BuildHouse) == null) return false;
+        maxHandCards = Mathf.Max(maxHandCards, shown.Count + spent.Count + pendingRewards.Count + 1);
+        return AddCard(ActivityKind.BuildHouse);
+    }
 
     public bool QueueRewardCard(ActivityKind kind)
     {

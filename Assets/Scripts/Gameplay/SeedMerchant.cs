@@ -10,8 +10,6 @@ public sealed class SeedMerchant : MonoBehaviour
     [SerializeField] private SeedCatalog catalog;
     [SerializeField] private DayCycle dayCycle;
     [SerializeField] private GameFeedback feedback;
-    [SerializeField] private GameObject stallVisual;
-    [SerializeField] private GameObject closedStallLock;
     [SerializeField] private CanvasGroup shopGroup;
     [SerializeField] private Text shopStatusText;
     [SerializeField] private DragCursorPreview dragPreview;
@@ -19,12 +17,8 @@ public sealed class SeedMerchant : MonoBehaviour
     [SerializeField] private DayTimeline timeline;
     [SerializeField] private ShopTabs shopTabs;
     [SerializeField] private ActivityCardAvailability hand;
-    [SerializeField] private HouseSite houseSite;
-    [SerializeField] private HouseSite secondHouseSite;
     [SerializeField, Min(0)] private int fenceWoodCost = 4;
     [SerializeField, Min(0)] private int fenceCoinCost = 8;
-    [SerializeField, Min(0)] private int houseWoodCost = 8;
-    [SerializeField, Min(0)] private int houseCoinCost = 30;
     [SerializeField] private int[] marketDays = { 1, 3, 5, 7, 9, 11 };
     [SerializeField, Min(1)] private int foodCoinCost = 1;
     [SerializeField, Min(0)] private float panelFadeDuration = 0.25f;
@@ -35,13 +29,6 @@ public sealed class SeedMerchant : MonoBehaviour
     public int FenceWoodCost => fenceWoodCost;
     public int FenceCoinCost => fenceCoinCost;
     public int FenceSlotsAvailable => hand != null ? hand.FreeSlots : 0;
-    public int HouseWoodCost => houseWoodCost;
-    public int HouseCoinCost => houseCoinCost;
-    public int HouseSlotsAvailable => hand == null ? 0 : Mathf.Min(hand.FreeSlots,
-        Mathf.Max(0, (houseSite != null ? 1 : 0) + (secondHouseSite != null ? 1 : 0) - housesPurchased),
-        (houseSite != null && !houseSite.IsBuilt ? 1 : 0) +
-        (secondHouseSite != null && !secondHouseSite.IsBuilt ? 1 : 0));
-    private int housesPurchased;
 
     private void Awake()
     {
@@ -66,8 +53,6 @@ public sealed class SeedMerchant : MonoBehaviour
     {
         bool scheduled = Array.IndexOf(marketDays, day) >= 0;
         IsAvailable = hasDeliveryDue || scheduled || day == 12;
-        if (stallVisual != null) stallVisual.SetActive(IsAvailable);
-        if (closedStallLock != null) closedStallLock.SetActive(!IsAvailable);
         HideShop();
         AvailabilityChanged?.Invoke();
     }
@@ -85,17 +70,14 @@ public sealed class SeedMerchant : MonoBehaviour
         };
     }
 
-    public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int jerimumSeeds, int food, int fences,
-        int houses = 0)
+    public bool TryBuyCart(int cornSeeds, int pumpkinSeeds, int jerimumSeeds, int food, int fences)
     {
         if (!IsAvailable || !IsOpen || dayCycle == null || !dayCycle.CanAcceptActions || resources == null ||
             catalog == null ||
             cornSeeds != 0 || pumpkinSeeds != 0 || jerimumSeeds != 0 || food < 0 || fences < 0 ||
-            houses < 0 || houses > HouseSlotsAvailable ||
-            fences + houses > FenceSlotsAvailable ||
-            resources.Wood < fences * fenceWoodCost + houses * houseWoodCost) return false;
-        long total = (long)food * GetUnitPrice(SaleItem.Food) + (long)fences * fenceCoinCost +
-            (long)houses * houseCoinCost;
+            fences > FenceSlotsAvailable ||
+            resources.Wood < fences * fenceWoodCost) return false;
+        long total = (long)food * GetUnitPrice(SaleItem.Food) + (long)fences * fenceCoinCost;
         if (total <= 0 || total > int.MaxValue || !resources.TrySpendCoins((int)total))
         {
             if (feedback != null) feedback.ShowMessage("Moedas insuficientes para a compra.");
@@ -112,12 +94,6 @@ public sealed class SeedMerchant : MonoBehaviour
         {
             resources.TrySpendWood(fences * fenceWoodCost);
             for (int i = 0; i < fences; i++) hand.AddCard(ActivityKind.BuildFence);
-        }
-        if (houses > 0)
-        {
-            resources.TrySpendWood(houses * houseWoodCost);
-            for (int i = 0; i < houses; i++) hand.AddCard(ActivityKind.BuildHouse);
-            housesPurchased += houses;
         }
         if (feedback != null) feedback.ShowMessage("Compra concluída: -" + total + " moedas.");
         return true;

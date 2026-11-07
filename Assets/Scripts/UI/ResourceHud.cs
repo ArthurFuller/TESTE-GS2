@@ -46,8 +46,13 @@ public sealed class ResourceHud : MonoBehaviour
     private Sprite circleSprite;
     private readonly int[] displayed = new int[9];
     private readonly Tween[] counterTweens = new Tween[9];
+    private readonly Tween[] counterPulses = new Tween[9];
     private readonly Color[] textColors = new Color[9];
     private readonly Color[] iconColors = new Color[9];
+    private readonly Material[] iconFlashMaterials = new Material[9];
+    private readonly Material[] originalIconMaterials = new Material[9];
+    private static readonly int FlashId = Shader.PropertyToID("_Flash");
+    private static readonly int FlashColorId = Shader.PropertyToID("_FlashColor");
     private ResourceCounterHover counterHover;
 
     private Camera UiCamera => canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
@@ -63,14 +68,26 @@ public sealed class ResourceHud : MonoBehaviour
     private void OnEnable()
     {
         counterHover = GetComponent<ResourceCounterHover>();
+        Shader flashShader = Resources.Load<Shader>("ResourceIconFlash");
         for (int i = 0; i < displayed.Length; i++)
         {
+            counterPulses[i]?.Kill();
             ResourceKind kind = (ResourceKind)i;
             displayed[i] = Stored(kind);
             Text label = TargetFor(kind);
             Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
             if (label != null) textColors[i] = label.color;
-            if (icon != null) iconColors[i] = icon.color;
+            if (icon != null)
+            {
+                iconColors[i] = icon.color;
+                if (flashShader != null)
+                {
+                    originalIconMaterials[i] = icon.material;
+                    iconFlashMaterials[i] = new Material(flashShader)
+                        { hideFlags = HideFlags.DontSave };
+                    icon.material = iconFlashMaterials[i];
+                }
+            }
         }
         if (resources != null) resources.Changed += Refresh;
         Refresh();
@@ -85,8 +102,25 @@ public sealed class ResourceHud : MonoBehaviour
             ResourceKind kind = (ResourceKind)i;
             Text label = TargetFor(kind);
             Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
-            if (label != null) { label.DOKill(); label.color = textColors[i]; }
-            if (icon != null) { icon.DOKill(); icon.color = iconColors[i]; }
+            if (label != null)
+            {
+                label.DOKill();
+                label.color = textColors[i];
+            }
+            if (icon != null)
+            {
+                icon.DOKill();
+                icon.color = iconColors[i];
+            }
+            if (iconFlashMaterials[i] != null)
+            {
+                if (icon != null) icon.material = originalIconMaterials[i];
+                Destroy(iconFlashMaterials[i]);
+                iconFlashMaterials[i] = null;
+            }
+            if (label != null && icon != null &&
+                label.rectTransform.parent == icon.rectTransform.parent)
+                label.rectTransform.parent.localScale = Vector3.one;
         }
         System.Array.Clear(inFlight, 0, inFlight.Length);
     }
@@ -344,21 +378,50 @@ public sealed class ResourceHud : MonoBehaviour
     private void FlashCounter(ResourceKind kind, int direction)
     {
         int index = (int)kind;
-        Color flash = direction < 0 ? new Color(0.95f, 0.14f, 0.14f) :
-            new Color(0.31f, 0.76f, 0.32f);
+        Color flash = direction < 0 ? new Color(0.95f, 0.14f, 0.14f) : Color.white;
         Text label = TargetFor(kind);
         Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
+        counterPulses[index]?.Kill();
+        Sequence pulse = DOTween.Sequence().SetTarget(this);
+        counterPulses[index] = pulse;
+        if (label != null && icon != null)
+        {
+            RectTransform numberRect = label.rectTransform;
+            RectTransform iconRect = icon.rectTransform;
+            if (numberRect.parent == iconRect.parent)
+            {
+                numberRect.parent.localScale = Vector3.one;
+                pulse.Insert(0f, numberRect.parent.DOScale(1.08f, 0.09f)
+                    .SetLoops(2, LoopType.Yoyo).SetEase(Ease.OutQuad));
+            }
+        }
         if (label != null)
         {
             label.DOKill();
-            label.color = flash;
-            label.DOColor(textColors[index], 0.14f);
+            label.color = textColors[index];
+            pulse.Insert(0f, label.DOColor(flash, 0.055f));
+            pulse.Insert(0.055f, label.DOColor(textColors[index], 0.12f));
         }
         if (icon != null)
         {
             icon.DOKill();
-            icon.color = new Color(flash.r, flash.g, flash.b, iconColors[index].a);
-            icon.DOColor(iconColors[index], 0.14f);
+            icon.color = iconColors[index];
+            Material material = iconFlashMaterials[index];
+            if (material != null)
+            {
+                material.SetColor(FlashColorId, flash);
+                material.SetFloat(FlashId, 0f);
+                pulse.Insert(0f, DOTween.To(() => material.GetFloat(FlashId),
+                    value => material.SetFloat(FlashId, value), 1f, 0.055f));
+                pulse.Insert(0.055f, DOTween.To(() => material.GetFloat(FlashId),
+                    value => material.SetFloat(FlashId, value), 0f, 0.12f));
+            }
+            else
+            {
+                Color fallback = new Color(flash.r, flash.g, flash.b, iconColors[index].a);
+                pulse.Insert(0f, icon.DOColor(fallback, 0.055f));
+                pulse.Insert(0.055f, icon.DOColor(iconColors[index], 0.12f));
+            }
         }
     }
 

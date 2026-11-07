@@ -10,7 +10,6 @@ public sealed class ShopBuyPanel : MonoBehaviour
     [SerializeField] private ShopQuantityRow jerimumRow;
     [SerializeField] private ShopQuantityRow foodRow;
     [SerializeField] private ShopQuantityRow fenceRow;
-    [SerializeField] private ShopQuantityRow houseRow;
     [SerializeField] private Text totalText;
     [SerializeField] private Button buyButton;
     [SerializeField] private Button resetButton;
@@ -18,7 +17,7 @@ public sealed class ShopBuyPanel : MonoBehaviour
 
     private void Awake()
     {
-        rows = new[] { foodRow, fenceRow, houseRow };
+        rows = new[] { foodRow, fenceRow };
         if (buyButton != null) buyButton.onClick.AddListener(Buy);
         if (resetButton != null) resetButton.onClick.AddListener(ResetSelection);
     }
@@ -47,38 +46,30 @@ public sealed class ShopBuyPanel : MonoBehaviour
 
     public void Buy()
     {
-        if (merchant == null || foodRow == null || fenceRow == null || houseRow == null) return;
-        if (merchant.TryBuyCart(0, 0, 0, foodRow.Quantity, fenceRow.Quantity,
-            houseRow.Quantity)) ResetSelection();
+        if (merchant == null || foodRow == null || fenceRow == null) return;
+        if (merchant.TryBuyCart(0, 0, 0, foodRow.Quantity, fenceRow.Quantity)) ResetSelection();
     }
 
     public void Refresh()
     {
-        if (merchant == null || resources == null || foodRow == null || fenceRow == null ||
-            houseRow == null) return;
+        if (merchant == null || resources == null || foodRow == null || fenceRow == null) return;
         int[] prices = {
             merchant.GetUnitPrice(SaleItem.Food),
-            merchant.FenceCoinCost,
-            merchant.HouseCoinCost
+            merchant.FenceCoinCost
         };
         int budget = resources.Coins;
         int woodBudget = resources.Wood;
         for (int i = 0; i < rows.Length; i++)
         {
             rows[i].SetPrice(prices[i]);
-            rows[i].SetWoodPrice(i == 1 ? merchant.FenceWoodCost :
-                i == 2 ? merchant.HouseWoodCost : 0);
+            rows[i].SetWoodPrice(i == 1 ? merchant.FenceWoodCost : 0);
             int limit = prices[i] > 0 ? budget / prices[i] : 0;
             if (i == 1)
                 limit = Mathf.Min(limit, merchant.FenceWoodCost > 0 ?
                     woodBudget / merchant.FenceWoodCost : int.MaxValue, merchant.FenceSlotsAvailable);
-            if (i == 2)
-                limit = Mathf.Min(limit, merchant.HouseWoodCost > 0 ?
-                    woodBudget / merchant.HouseWoodCost : int.MaxValue, merchant.HouseSlotsAvailable);
             rows[i].SetLimit(limit);
             budget -= rows[i].Quantity * prices[i];
-            woodBudget -= rows[i].Quantity * (i == 1 ? merchant.FenceWoodCost :
-                i == 2 ? merchant.HouseWoodCost : 0);
+            woodBudget -= rows[i].Quantity * (i == 1 ? merchant.FenceWoodCost : 0);
         }
         int total = resources.Coins - budget;
         for (int i = 0; i < rows.Length; i++)
@@ -88,16 +79,11 @@ public sealed class ShopBuyPanel : MonoBehaviour
                 limit = Mathf.Min(limit, rows[i].Quantity +
                     (merchant.FenceWoodCost > 0 ? woodBudget / merchant.FenceWoodCost : int.MaxValue),
                     merchant.FenceSlotsAvailable);
-            if (i == 2)
-                limit = Mathf.Min(limit, rows[i].Quantity +
-                    (merchant.HouseWoodCost > 0 ? woodBudget / merchant.HouseWoodCost : int.MaxValue),
-                    merchant.HouseSlotsAvailable);
             rows[i].SetLimit(limit);
         }
         if (totalText != null) totalText.text = "TOTAL: " + total + " moedas" +
-            (fenceRow.Quantity + houseRow.Quantity > 0 ? " + " +
-                (fenceRow.Quantity * merchant.FenceWoodCost +
-                 houseRow.Quantity * merchant.HouseWoodCost) + " madeiras" : "");
+            (fenceRow.Quantity > 0 ? " + " +
+                fenceRow.Quantity * merchant.FenceWoodCost + " madeiras" : "");
         if (buyButton != null) buyButton.interactable = total > 0 && merchant.IsAvailable;
     }
 }

@@ -1,0 +1,239 @@
+using System.Collections.Generic;
+using DG.Tweening;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+
+public sealed class TopBarAutoHide : MonoBehaviour
+{
+    [SerializeField] private RectTransform bar;
+    [SerializeField] private RectTransform background;
+    [SerializeField] private DayCycle dayCycle;
+    [SerializeField] private DayTimeline timeline;
+    [SerializeField] private ActiveMissionsPanel missionsPanel;
+    [SerializeField] private ActivityCardAvailability hand;
+    [SerializeField] private Vector2 openPosition = Vector2.zero;
+    [SerializeField] private Vector2 closedPosition = new Vector2(0f, 178f);
+    [SerializeField, InspectorName("Posição ao visualizar um dia")]
+    private Vector2 timelineDayPosition = new Vector2(0f, 90f);
+    [SerializeField, Min(0.1f)] private float idleSeconds = 10f;
+    [SerializeField, Min(0.01f)] private float slideDuration = 0.36f;
+    [SerializeField, Min(0f)] private float waveDelay = 0.055f;
+    [SerializeField, Min(0f)] private float widgetOffset = 24f;
+
+    private RectTransform[] widgets;
+    private Vector2[] widgetPositions;
+    private Button[] buttons;
+    private Camera uiCamera;
+    private Sequence motion;
+    private bool open;
+    private bool dayActive;
+    private bool waitForPointerExit;
+    private bool timelineDayOpen;
+    private bool closingAfterTimeline;
+    private float lastHoverTime;
+
+    private void Awake()
+    {
+        if (bar == null) bar = (RectTransform)transform;
+        buttons = bar.GetComponentsInChildren<Button>(true);
+        var ordered = new List<RectTransform>(bar.childCount);
+        for (int i = 0; i < bar.childCount; i++)
+        {
+            RectTransform child = bar.GetChild(i) as RectTransform;
+            if (child != null && child != background && child.gameObject.activeSelf)
+                ordered.Add(child);
+        }
+        ordered.Sort((a, b) => a.anchoredPosition.x.CompareTo(b.anchoredPosition.x));
+        widgets = ordered.ToArray();
+        widgetPositions = new Vector2[widgets.Length];
+        for (int i = 0; i < widgets.Length; i++)
+            widgetPositions[i] = widgets[i].anchoredPosition;
+        Canvas canvas = GetComponentInParent<Canvas>();
+        uiCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+            ? canvas.worldCamera : null;
+    }
+
+    private void OnEnable()
+    {
+        if (dayCycle != null)
+        {
+            dayCycle.DayChanged += OpenForNewDay;
+            dayCycle.DayClosing += CloseForDayEnd;
+            dayCycle.DayClosingCancelled += OpenForNewDay;
+        }
+        SetOpen(false, true);
+    }
+
+    private void OnDisable()
+    {
+        if (dayCycle != null)
+        {
+            dayCycle.DayChanged -= OpenForNewDay;
+            dayCycle.DayClosing -= CloseForDayEnd;
+            dayCycle.DayClosingCancelled -= OpenForNewDay;
+        }
+        motion?.Kill();
+    }
+
+    private void Update()
+    {
+        if (!dayActive || closingAfterTimeline) return;
+        if (Mouse.current == null) return;
+        Vector2 pointer = Mouse.current.position.ReadValue();
+        bool overBar = RectTransformUtility.RectangleContainsScreenPoint(bar, pointer, uiCamera);
+        bool overTimeline = timeline != null && timeline.IsOpen &&
+            timeline.PanelClip != null &&
+            RectTransformUtility.RectangleContainsScreenPoint(
+                timeline.PanelClip, pointer, uiCamera);
+        if (open && overBar && Mouse.current.leftButton.wasPressedThisFrame &&
+            !overTimeline && !OverButton(pointer))
+        {
+            missionsPanel?.Close();
+            waitForPointerExit = true;
+            CloseAfterTimeline();
+            return;
+        }
+        if (waitForPointerExit)
+        {
+            if (overBar) return;
+            waitForPointerExit = false;
+        }
+        if ((timeline != null && timeline.IsOpen) ||
+            (missionsPanel != null && missionsPanel.IsOpen))
+        {
+            lastHoverTime = Time.unscaledTime;
+            if (!open) SetOpen(true, false);
+            return;
+        }
+        if (hand != null && hand.IsDraggingCard)
+        {
+            lastHoverTime = Time.unscaledTime;
+            return;
+        }
+        if (overBar)
+        {
+            lastHoverTime = Time.unscaledTime;
+            if (!open) SetOpen(true, false);
+        }
+        else if (open && Time.unscaledTime - lastHoverTime >= idleSeconds)
+            SetOpen(false, false);
+    }
+
+    private void OpenForNewDay()
+    {
+        dayActive = true;
+        waitForPointerExit = false;
+        lastHoverTime = Time.unscaledTime;
+        SetOpen(true, false);
+    }
+
+    private bool OverButton(Vector2 pointer)
+    {
+        foreach (Button button in buttons)
+            if (button != null && button.isActiveAndEnabled && button.interactable &&
+                RectTransformUtility.RectangleContainsScreenPoint(
+                    (RectTransform)button.transform, pointer, uiCamera))
+                return true;
+        return false;
+    }
+
+    private void CloseForDayEnd()
+    {
+        dayActive = false;
+        CloseAfterTimeline();
+    }
+
+    public void PreviewCurrentPosition()
+    {
+        if (!Application.isPlaying) return;
+        motion?.Complete();
+        MoveBar(timelineDayOpen ? timelineDayPosition :
+            open ? openPosition : closedPosition, true, null);
+    }
+
+    public void MoveToTimelineDay(System.Action onComplete)
+    {
+        timelineDayOpen = true;
+        open = true;
+        lastHoverTime = Time.unscaledTime;
+        MoveBar(timelineDayPosition, false, onComplete);
+    }
+
+    public void ReturnFromTimelineDay(System.Action onComplete)
+    {
+        timelineDayOpen = false;
+        lastHoverTime = Time.unscaledTime;
+        MoveBar(openPosition, false, onComplete);
+    }
+
+    private void CloseAfterTimeline()
+    {
+        if (timeline != null && timeline.IsOpen)
+        {
+            closingAfterTimeline = true;
+            timeline.ClosePanel(() =>
+            {
+                closingAfterTimeline = false;
+                SetOpen(false, false);
+            });
+            return;
+        }
+        SetOpen(false, false);
+    }
+
+    private void SetOpen(bool show, bool immediate)
+    {
+        if (open == show && !immediate) return;
+        open = show;
+        timelineDayOpen = false;
+        lastHoverTime = Time.unscaledTime;
+        motion?.Kill();
+        if (bar == null) return;
+        Vector2 destination = show ? openPosition : closedPosition;
+        float exitDistance = bar.rect.height +
+            Mathf.Abs(closedPosition.y - openPosition.y) + widgetOffset;
+        if (immediate)
+        {
+            MoveBar(destination, true, null);
+            for (int i = 0; i < widgets.Length; i++)
+                widgets[i].anchoredPosition = widgetPositions[i] +
+                    (show ? Vector2.zero : Vector2.up * exitDistance);
+            return;
+        }
+        MoveBar(destination, false, null);
+        for (int i = 0; i < widgets.Length; i++)
+        {
+            if (!widgets[i].gameObject.activeSelf) continue;
+            Vector2 widgetTarget = widgetPositions[i] +
+                (show ? Vector2.zero : Vector2.up * exitDistance);
+            float delay = show ? slideDuration + i * waveDelay : 0f;
+            motion.Insert(delay, widgets[i].DOAnchorPos(widgetTarget, slideDuration * 0.65f)
+                .SetEase(show ? Ease.OutCubic : Ease.InCubic));
+        }
+    }
+
+    private void MoveBar(Vector2 destination, bool immediate, System.Action onComplete)
+    {
+        motion?.Kill();
+        if (bar == null) return;
+        bool separateArt = background != null && background.parent != bar;
+        float artScale = separateArt && bar.rect.width > 0f
+            ? background.rect.width / bar.rect.width : 1f;
+        if (immediate)
+        {
+            bar.anchoredPosition = destination;
+            if (separateArt) background.anchoredPosition = destination * artScale;
+            timeline?.FollowHud(bar.anchoredPosition - openPosition);
+            onComplete?.Invoke();
+            return;
+        }
+        motion = DOTween.Sequence().SetUpdate(true);
+        motion.Insert(0f, bar.DOAnchorPos(destination, slideDuration).SetEase(Ease.InOutCubic));
+        if (separateArt)
+            motion.Insert(0f, background.DOAnchorPos(destination * artScale, slideDuration)
+                .SetEase(Ease.InOutCubic));
+        motion.OnUpdate(() => timeline?.FollowHud(bar.anchoredPosition - openPosition));
+        motion.OnComplete(() => onComplete?.Invoke());
+    }
+}

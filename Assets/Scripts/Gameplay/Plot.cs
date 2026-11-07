@@ -263,13 +263,23 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public List<Plot> ReadyConnectedPlots(int currentDay, SeedCatalog catalog)
     {
+        return ConnectedPlots(plot => plot.IsReady(currentDay, catalog));
+    }
+
+    public List<Plot> ConnectedPlotsFor(ActivityKind activity, int currentDay, SeedCatalog catalog)
+    {
+        return ConnectedPlots(plot => plot.CanUse(activity, currentDay, catalog));
+    }
+
+    private List<Plot> ConnectedPlots(System.Predicate<Plot> eligible)
+    {
         var ready = new List<Plot>();
-        if (IsReady(currentDay, catalog)) ready.Add(this);
+        if (eligible(this)) ready.Add(this);
         if (joinedVisual == null) return ready;
 
         var remaining = new List<Plot>();
         foreach (Plot member in joinedVisual.Members)
-            if (member != null && member != this && member.IsReady(currentDay, catalog))
+            if (member != null && member != this && eligible(member))
                 remaining.Add(member);
         Plot previous = this;
         while (remaining.Count > 0)

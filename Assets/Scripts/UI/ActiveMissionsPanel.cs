@@ -17,6 +17,8 @@ public sealed class ActiveMissionsPanel : MonoBehaviour
     private bool isOpen;
     private Vector2 openPosition;
 
+    public bool IsOpen => isOpen;
+
     private void Awake()
     {
         if (contentRect != null) openPosition = contentRect.anchoredPosition;

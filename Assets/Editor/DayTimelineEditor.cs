@@ -7,8 +7,13 @@ public sealed class DayTimelineEditor : Editor
     public override void OnInspectorGUI()
     {
         bool changed = DrawDefaultInspector();
-        if (changed && EditorApplication.isPlaying)
-            DayTimelinePlaySave.RecordCurrent((DayTimeline)target);
+        if (changed)
+        {
+            DayTimeline timeline = (DayTimeline)target;
+            if (timeline.PanelClip != null)
+                timeline.PanelClip.anchoredPosition = timeline.PanelClipPosition;
+            if (EditorApplication.isPlaying) DayTimelinePlaySave.RecordCurrent(timeline);
+        }
 
         float cardWidth = serializedObject.FindProperty("cardWidth").floatValue;
         float cardHeight = serializedObject.FindProperty("cardHeight").floatValue;
@@ -47,8 +52,8 @@ public sealed class DayTimelineEditor : Editor
         EditorGUI.DrawRect(new Rect(left + stride * scale + (width - pin) * 0.5f,
             top - pin * 0.5f, pin, pin), new Color(0.16f, 0.15f, 0.12f));
         EditorGUILayout.HelpBox("A prévia mostra as proporções. Durante o Play Mode, " +
-            "alterações nos campos das cartas atualizam a aba aberta e são salvas na cena " +
-            "ao sair do Play Mode.",
+            "os campos das cartas e o Deslocamento do painel são salvos ao sair. " +
+            "Também é possível mover o Recorte da linha do tempo, ou o painel com a aba aberta, na Hierarquia.",
             MessageType.Info);
     }
 

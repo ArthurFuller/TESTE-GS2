@@ -1,4 +1,5 @@
 using System;
+using DG.Tweening;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -13,6 +14,7 @@ public static class DayTimelinePlaySave
         public string scenePath;
         public int totalDays;
         public float[] values;
+        public Vector2 panelOffset;
         public bool changed;
     }
 
@@ -59,18 +61,23 @@ public static class DayTimelinePlaySave
         DayTimeline timeline = previous != null ? FindTimeline(previous.scenePath) : null;
         if (timeline == null) return;
         Settings current = Capture(timeline);
+        RectTransform clip = timeline.PanelClip;
         if (previous.values == null || previous.values.Length != Fields.Length ||
-            previous.totalDays != current.totalDays)
+            previous.totalDays != current.totalDays ||
+            (previous.panelOffset - current.panelOffset).sqrMagnitude > 0.0001f)
         {
+            if (clip != null) clip.anchoredPosition = timeline.PanelClipPosition;
             RecordCurrent(timeline);
             return;
         }
         for (int i = 0; i < Fields.Length; i++)
             if (!Mathf.Approximately(previous.values[i], current.values[i]))
             {
+                if (clip != null) clip.anchoredPosition = timeline.PanelClipPosition;
                 RecordCurrent(timeline);
                 return;
             }
+        CaptureMovedClip(timeline);
     }
 
     private static void OnPlayModeChanged(PlayModeStateChange state)
@@ -84,15 +91,17 @@ public static class DayTimelinePlaySave
         else if (state == PlayModeStateChange.ExitingPlayMode)
         {
             Settings original = Read();
+            DayTimeline timeline = original != null ? FindTimeline(original.scenePath) : null;
+            if (CaptureMovedClip(timeline)) return;
             // Inspector edits were captured when they happened. Do not replace them
             // with values restored by Unity while Play Mode is closing.
             if (original != null && original.changed) return;
-            DayTimeline timeline = original != null ? FindTimeline(original.scenePath) : null;
             if (timeline == null) return;
             Settings current = Capture(timeline);
             current.changed = original.values == null ||
                 original.values.Length != Fields.Length ||
-                original.totalDays != current.totalDays;
+                original.totalDays != current.totalDays ||
+                (original.panelOffset - current.panelOffset).sqrMagnitude > 0.0001f;
             for (int i = 0; i < Fields.Length; i++)
                 if (original.values != null && i < original.values.Length &&
                     !Mathf.Approximately(original.values[i], current.values[i]))
@@ -111,6 +120,26 @@ public static class DayTimelinePlaySave
         return null;
     }
 
+    private static bool CaptureMovedClip(DayTimeline timeline)
+    {
+        RectTransform clip = timeline != null ? timeline.PanelClip : null;
+        if (clip == null) return false;
+        Vector2 delta = clip.anchoredPosition - timeline.PanelClipPosition;
+        RectTransform panel = timeline.TimelinePanel;
+        bool movedPanel = delta.sqrMagnitude <= 0.0001f && timeline.IsOpen &&
+            panel != null && !DOTween.IsTweening(panel);
+        if (movedPanel) delta = panel.anchoredPosition - timeline.PanelHomePosition;
+        if (delta.sqrMagnitude <= 0.0001f) return false;
+        var moved = new SerializedObject(timeline);
+        SerializedProperty offset = moved.FindProperty("panelOffset");
+        offset.vector2Value += delta;
+        moved.ApplyModifiedPropertiesWithoutUndo();
+        clip.anchoredPosition = timeline.PanelClipPosition;
+        if (movedPanel) panel.anchoredPosition = timeline.PanelHomePosition;
+        RecordCurrent(timeline);
+        return true;
+    }
+
     private static Settings Capture(DayTimeline timeline)
     {
         var source = new SerializedObject(timeline);
@@ -118,6 +147,7 @@ public static class DayTimelinePlaySave
         {
             scenePath = timeline.gameObject.scene.path,
             totalDays = source.FindProperty("totalDays").intValue,
+            panelOffset = source.FindProperty("panelOffset").vector2Value,
             values = new float[Fields.Length]
         };
         for (int i = 0; i < Fields.Length; i++)
@@ -143,6 +173,7 @@ public static class DayTimelinePlaySave
 
         var destination = new SerializedObject(timeline);
         destination.FindProperty("totalDays").intValue = settings.totalDays;
+        destination.FindProperty("panelOffset").vector2Value = settings.panelOffset;
         for (int i = 0; settings.values != null &&
             i < Fields.Length && i < settings.values.Length; i++)
             destination.FindProperty(Fields[i]).floatValue = settings.values[i];
