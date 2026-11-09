@@ -6370,6 +6370,8 @@ MonoBehaviour:
   actionResolver: {fileID: 467295183}
   workProgress: {fileID: 299139915}
   comadreDizzyPrefab: {fileID: 2547824403630278182, guid: 9975bbe0056a14546ab976134fac9971, type: 3}
+  testSprite: {fileID: 21300000, guid: d7b2f8bd32993fa4084bd1b75eba68b0, type: 3}
+  testSpriteHeight: 1.9
 --- !u!135 &299139913
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -51707,6 +51709,8 @@ MonoBehaviour:
   actionResolver: {fileID: 467295183}
   workProgress: {fileID: 2039851341}
   comadreDizzyPrefab: {fileID: 2547824403630278182, guid: 9975bbe0056a14546ab976134fac9971, type: 3}
+  testSprite: {fileID: 21300000, guid: d7b2f8bd32993fa4084bd1b75eba68b0, type: 3}
+  testSpriteHeight: 1.9
 --- !u!135 &2039851339
 SphereCollider:
   m_ObjectHideFlags: 0

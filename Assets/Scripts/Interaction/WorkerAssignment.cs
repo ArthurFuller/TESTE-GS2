@@ -12,6 +12,9 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     [SerializeField] private ActionResolver actionResolver;
     [SerializeField] private WorkProgress workProgress;
     [SerializeField] private ParticleSystem comadreDizzyPrefab;
+    [Header("Teste visual 2D")]
+    [SerializeField] private Sprite testSprite;
+    [SerializeField, Min(0.1f)] private float testSpriteHeight = 1.9f;
 
     public static WorkerAssignment Selected { get; private set; }
     public bool UsedToday => IsUnavailableToday || actionsRemaining <= 0;
@@ -34,10 +37,12 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private readonly List<Transform> actionDots = new List<Transform>();
     private Transform actionDotsRoot;
     private ParticleSystem comadreDizzy;
+    private Transform spriteVisual;
 
     private void Awake()
     {
         HomePosition = transform.position;
+        SetupTestSprite();
         if (comadreDizzyPrefab != null)
         {
             comadreDizzy = Instantiate(comadreDizzyPrefab, transform, false);
@@ -51,8 +56,31 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     private void LateUpdate()
     {
+        if (spriteVisual != null && Camera.main != null)
+            spriteVisual.rotation = Camera.main.transform.rotation;
         if (actionDotsRoot != null)
             actionDotsRoot.position = transform.position + Vector3.up * 1.65f;
+    }
+
+    private void SetupTestSprite()
+    {
+        if (testSprite == null) return;
+        Transform body = transform.Find("Corpo");
+        Transform head = transform.Find("Cabeça");
+        if (body != null) body.gameObject.SetActive(false);
+        if (head != null) head.gameObject.SetActive(false);
+
+        spriteVisual = transform.Find("Visual 2D - teste");
+        if (spriteVisual == null)
+        {
+            spriteVisual = new GameObject("Visual 2D - teste", typeof(SpriteRenderer)).transform;
+            spriteVisual.SetParent(transform, false);
+        }
+        SpriteRenderer visual = spriteVisual.GetComponent<SpriteRenderer>();
+        visual.sprite = testSprite;
+        visual.spriteSortPoint = SpriteSortPoint.Pivot;
+        spriteVisual.localPosition = new Vector3(0f, 0.05f, 0f);
+        spriteVisual.localScale = Vector3.one * (testSpriteHeight / testSprite.bounds.size.y);
     }
 
     private void OnDestroy()
