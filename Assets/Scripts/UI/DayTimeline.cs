@@ -809,7 +809,15 @@ public sealed class DayTimeline : MonoBehaviour
             inspectionDescription.sizeDelta = new Vector2(panelWidth, panelHeight);
             float panelX = source.rect.width * scale * 0.5f + gap;
             inspectionDescription.anchoredPosition = new Vector2(panelX + 16f, 0f);
-            inspectionDescription.GetComponent<Image>().raycastTarget = false;
+            Image descriptionBackground = inspectionDescription.GetComponent<Image>();
+            if (descriptionBackground != null)
+            {
+                // Same dark background used by CardRewardChoice tooltips.
+                descriptionBackground.sprite = null;
+                descriptionBackground.type = Image.Type.Simple;
+                descriptionBackground.color = new Color(0.1f, 0.09f, 0.07f, 0.92f);
+                descriptionBackground.raycastTarget = false;
+            }
             CanvasGroup panelGroup = inspectionDescription.GetComponent<CanvasGroup>();
             if (panelGroup == null)
                 panelGroup = inspectionDescription.gameObject.AddComponent<CanvasGroup>();
@@ -820,9 +828,11 @@ public sealed class DayTimeline : MonoBehaviour
             {
                 text.text = string.IsNullOrWhiteSpace(description) ?
                     "Sem descrição desta carta." : description;
-                text.fontSize = 18;
+                text.fontSize = 14;
+                text.color = Color.white;
                 text.resizeTextForBestFit = true;
-                text.resizeTextMinSize = 13;
+                text.resizeTextMinSize = 11;
+                text.resizeTextMaxSize = 14;
                 text.alignment = TextAnchor.MiddleLeft;
                 RectTransform textRect = text.rectTransform;
                 textRect.anchorMin = Vector2.zero;

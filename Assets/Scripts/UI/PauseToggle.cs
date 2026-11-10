@@ -9,9 +9,11 @@ public sealed class PauseToggle : MonoBehaviour
     [SerializeField] private Button missionsButton;
 
     private bool paused;
+    private Canvas buttonCanvas;
 
     private void Awake()
     {
+        if (button != null) buttonCanvas = button.GetComponent<Canvas>();
         if (button != null) button.onClick.AddListener(Toggle);
         UpdateDisplay();
     }
@@ -31,6 +33,12 @@ public sealed class PauseToggle : MonoBehaviour
 
     private void UpdateDisplay()
     {
+        // Keep only the existing pause/return button above the overlay.
+        if (buttonCanvas != null)
+        {
+            buttonCanvas.overrideSorting = paused;
+            buttonCanvas.sortingOrder = paused ? 5 : 0;
+        }
         if (label != null) label.text = paused ? ">" : "II";
         if (missionsButton != null) missionsButton.interactable = !paused;
         if (pauseOverlay == null) return;

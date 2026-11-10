@@ -28,6 +28,7 @@ public sealed class TopBarAutoHide : MonoBehaviour
     private Sequence motion;
     private bool open;
     private bool dayActive;
+    private bool wavePendingForDay = true;
     private bool waitForPointerExit;
     private bool timelineDayOpen;
     private bool closingAfterTimeline;
@@ -62,6 +63,7 @@ public sealed class TopBarAutoHide : MonoBehaviour
             dayCycle.DayClosing += CloseForDayEnd;
             dayCycle.DayClosingCancelled += OpenForNewDay;
         }
+        wavePendingForDay = true;
         SetOpen(false, true);
     }
 
@@ -122,6 +124,7 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
     private void OpenForNewDay()
     {
+        wavePendingForDay = true;
         dayActive = true;
         waitForPointerExit = false;
         lastHoverTime = Time.unscaledTime;
@@ -184,32 +187,35 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
     private void SetOpen(bool show, bool immediate)
     {
-        if (open == show && !immediate) return;
+        bool playWave = show && wavePendingForDay && !immediate;
+        if (open == show && !immediate && !playWave) return;
         open = show;
         timelineDayOpen = false;
         lastHoverTime = Time.unscaledTime;
         motion?.Kill();
         if (bar == null) return;
+
         Vector2 destination = show ? openPosition : closedPosition;
         float exitDistance = bar.rect.height +
             Mathf.Abs(closedPosition.y - openPosition.y) + widgetOffset;
-        if (immediate)
-        {
-            MoveBar(destination, true, null);
-            for (int i = 0; i < widgets.Length; i++)
-                widgets[i].anchoredPosition = widgetPositions[i] +
-                    (show ? Vector2.zero : Vector2.up * exitDistance);
-            return;
-        }
-        MoveBar(destination, false, null);
+
+        // During ordinary opening/closing, widgets remain fixed to their parent HUD.
+        // Only the first opening of each day receives staggered entrance tweens.
+        for (int i = 0; i < widgets.Length; i++)
+            widgets[i].anchoredPosition = widgetPositions[i] +
+                ((playWave || (immediate && !show && wavePendingForDay))
+                    ? Vector2.up * exitDistance : Vector2.zero);
+
+        MoveBar(destination, immediate, null);
+        if (!playWave) return;
+
+        wavePendingForDay = false;
         for (int i = 0; i < widgets.Length; i++)
         {
             if (!widgets[i].gameObject.activeSelf) continue;
-            Vector2 widgetTarget = widgetPositions[i] +
-                (show ? Vector2.zero : Vector2.up * exitDistance);
-            float delay = show ? slideDuration + i * waveDelay : 0f;
-            motion.Insert(delay, widgets[i].DOAnchorPos(widgetTarget, slideDuration * 0.65f)
-                .SetEase(show ? Ease.OutCubic : Ease.InCubic));
+            motion.Insert(slideDuration + i * waveDelay,
+                widgets[i].DOAnchorPos(widgetPositions[i], slideDuration * 0.65f)
+                    .SetEase(Ease.OutCubic));
         }
     }
 

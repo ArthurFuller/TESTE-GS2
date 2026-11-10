@@ -57,7 +57,8 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private void LateUpdate()
     {
         if (spriteVisual != null && Camera.main != null)
-            spriteVisual.rotation = Camera.main.transform.rotation;
+            // Mantem o sprite em pe: acompanha apenas a direcao horizontal da camera.
+            spriteVisual.rotation = Quaternion.Euler(0f, Camera.main.transform.eulerAngles.y, 0f);
         if (actionDotsRoot != null)
             actionDotsRoot.position = transform.position + Vector3.up * 1.65f;
     }
@@ -79,6 +80,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         SpriteRenderer visual = spriteVisual.GetComponent<SpriteRenderer>();
         visual.sprite = testSprite;
         visual.spriteSortPoint = SpriteSortPoint.Pivot;
+        visual.sortingOrder = 100;
         spriteVisual.localPosition = new Vector3(0f, 0.05f, 0f);
         spriteVisual.localScale = Vector3.one * (testSpriteHeight / testSprite.bounds.size.y);
     }

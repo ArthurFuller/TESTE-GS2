@@ -1,0 +1,17 @@
+TESTE-GS2 — Revisão das correções, sem novos objetos de interface ou shader de personagens
+
+Mantidos os ajustes de animação da barra superior, descrição da carta e lembrete de comunidade no painel de Encomendas. A substituição da imagem "Dia" permanece pendente.
+
+PAUSA:
+- Causa confirmada nos arquivos: Fundo da pausa é um overlay de tela inteira, com Raycast Target ativado, e é irmão posterior à Barra principal do HUD no Canvas. Durante a pausa, blocksRaycasts=true faz o overlay receber o clique antes do botão original.
+- Removido o botão adicional "VOLTAR AO JOGO" que havia sido introduzido.
+- Mantido o botão original Pausar ou retomar com a mesma função Toggle e a mudança II/> já existente.
+- Adicionados Canvas e GraphicRaycaster somente ao botão existente. PauseToggle eleva sua ordenação apenas quando pausado, mantendo as demais interfaces atrás do overlay.
+
+PERSONAGENS:
+- Retirados o shader e material customizados que forçavam ZTest Always e suas referências serializadas.
+- Mantido sortingOrder=100 no SpriteRenderer, sem afetar os materiais 3D. Atenção: sortingOrder organiza renderização de sprites, mas o teste de profundidade pode continuar ocultando trabalhadores atrás de malhas 3D opacas. Isso NÃO pode ser dado como correção garantida para casas sem validar no Editor.
+
+Validação necessária no Unity: clicar no botão original para pausar/despausar; verificar se outras interfaces ficam bloqueadas; verificar visualmente trabalhadores próximos às casas; testar interações da barra do HUD e os três ajustes anteriores.
+
+Não houve execução do Editor ou Play Mode nesta auditoria dos arquivos.

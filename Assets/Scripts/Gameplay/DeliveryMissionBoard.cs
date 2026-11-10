@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -29,8 +28,6 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
     [SerializeField] private ActiveMissionsPanel activePanel;
     [Header("Comunidade")]
     [SerializeField] private ActivityCardAvailability hand;
-    [SerializeField] private Image communityFill;
-    [SerializeField] private Text communityLabel;
     [SerializeField, Min(1)] private int deliveriesPerHouse = 2;
     [SerializeField, Range(1, 3)] private int houseRewardLimit = 3;
     [SerializeField, Range(1, 5)] private int minimumOffers = 2;
@@ -46,8 +43,6 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
     private bool marketOpen;
     private int communityDeliveries;
     private int housesRewarded;
-
-    private void Awake() => RefreshCommunity(false);
 
     public bool HasDeliveryDueOn(int day)
     {
@@ -143,29 +138,23 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
                 housesRewarded++;
                 if (feedback != null) feedback.ShowMessage("Comunidade: carta de casa recebida!");
             }
-            RefreshCommunity(true);
         }
         selectedIndex = Mathf.Clamp(selectedIndex, 0, Mathf.Max(0, missions.Count - 1));
         Refresh();
     }
 
-    private void RefreshCommunity(bool animate)
+    private string CommunityReminder()
     {
-        float progress = housesRewarded >= houseRewardLimit ? 1f :
-            Mathf.Clamp01((float)communityDeliveries / deliveriesPerHouse);
-        if (communityFill != null)
-        {
-            communityFill.DOKill();
-            if (animate) communityFill.DOFillAmount(progress, 0.35f).SetEase(Ease.OutCubic);
-            else communityFill.fillAmount = progress;
-        }
-        if (communityLabel != null)
-        {
-            int remaining = deliveriesPerHouse - communityDeliveries;
-            communityLabel.text = housesRewarded >= houseRewardLimit ?
-                "CASAS LIBERADAS" :
-                "NOVA CASA EM " + remaining + (remaining == 1 ? " ENTREGA" : " ENTREGAS");
-        }
+        if (housesRewarded >= houseRewardLimit)
+            return "Comunidade: todas as casas foram liberadas.";
+
+        int remaining = deliveriesPerHouse - communityDeliveries;
+        if (remaining <= 0)
+            return "Comunidade: nova casa aguardando espaço para ser liberada.";
+
+        return "Comunidade: " + (remaining == 1 ?
+            "falta 1 entrega para uma nova casa." :
+            "faltam " + remaining + " entregas para uma nova casa.");
     }
 
     private void GenerateOffers()
@@ -256,7 +245,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
         if (activePanel != null) activePanel.Refresh(missions, currentDay, resources);
         if (missions.Count == 0)
         {
-            if (orderText != null) orderText.text = "Nenhum pedido disponível.\nNovas ofertas chegam com a barraca.";
+            if (orderText != null) orderText.text = "Nenhum pedido disponível.\nNovas ofertas chegam com a barraca.\n\n" + CommunityReminder();
             if (acceptButton != null) acceptButton.interactable = false;
             if (deliverButton != null) deliverButton.interactable = false;
             if (nextButton != null) nextButton.interactable = false;
@@ -268,7 +257,8 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
         if (orderText != null)
             orderText.text = selected.title + "\nEntregar " + selected.quantity + " " + ItemName(selected.item) +
                 " (estoque: " + stock + ")\nPrazo: " + daysLeft + (daysLeft == 1 ? " dia" : " dias") +
-                "\nRecompensa: +" + selected.coinReward + " moedas";
+                "\nRecompensa: +" + selected.coinReward + " moedas" +
+                "\n\n" + CommunityReminder();
         if (acceptButton != null) acceptButton.interactable = marketOpen && !selected.accepted;
         if (deliverButton != null) deliverButton.interactable = selected.accepted && stock >= selected.quantity;
         if (nextButton != null) nextButton.interactable = missions.Count > 1;
