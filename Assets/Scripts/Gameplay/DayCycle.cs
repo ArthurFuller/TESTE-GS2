@@ -136,6 +136,7 @@ public sealed class DayCycle : MonoBehaviour
             feedback.ShowMessage("Minigame de alimentação não configurado.");
             return;
         }
+        AudioManager.Play(SoundCue.DayFinish);
         DayClosing?.Invoke();
         if (currentDay >= totalDays)
         {
@@ -316,11 +317,13 @@ public sealed class DayCycle : MonoBehaviour
             if (hand != null) hand.SuspendEntranceForEvent();
             dayEvents.AfterEventCardClosed(() =>
             {
+                AudioManager.Play(SoundCue.DayStart);
                 DayChanged?.Invoke();
                 if (addAnimalResources) AddDailyAnimalResources();
             });
             return;
         }
+        AudioManager.Play(SoundCue.DayStart);
         DayChanged?.Invoke();
         if (addAnimalResources) AddDailyAnimalResources();
     }

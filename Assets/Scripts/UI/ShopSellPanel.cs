@@ -59,6 +59,7 @@ public sealed class ShopSellPanel : MonoBehaviour
             coins += (long)quantities[(int)Items[i]] * trading.GetPrice(Items[i]);
         if (trading.TrySellBatch(quantities))
         {
+            AudioManager.Play(SoundCue.ShopSale);
             if (resourceHud != null && sellButton != null && coins > 0 && coins <= int.MaxValue)
                 resourceHud.FlyFromRect(ResourceKind.Coins, (int)coins, sellButton.transform as RectTransform);
             ResetSelection();

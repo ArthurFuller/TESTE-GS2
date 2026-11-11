@@ -512,6 +512,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         else dragWorldOffset = Vector3.zero;
         rect.SetAsLastSibling();
         dragging = true;
+        AudioManager.Play(SoundCue.CardPick);
         cancelled = false;
         OnDrag(eventData);
         UpdateHover(eventData.position);
@@ -567,7 +568,9 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         WorkerAssignment target = hoveredWorker;
         ClearDrag();
         if (target != null)
+        {
             target.TryAssign(activity, activityName, this);
+        }
         ActivityCardAvailability hand = transform.parent != null ?
             transform.parent.GetComponentInChildren<ActivityCardAvailability>(true) : null;
         if (!replayAnimating && !returning && gameObject.activeInHierarchy &&
@@ -600,6 +603,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
         returning = true;
+        AudioManager.Play(SoundCue.CardReturn);
         Vector3 cardCenter = rect.TransformPoint(rect.rect.center);
         rect.pivot = homePivot;
         rect.position += cardCenter - rect.TransformPoint(rect.rect.center);

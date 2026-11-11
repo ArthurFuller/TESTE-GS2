@@ -47,7 +47,11 @@ public sealed class ShopBuyPanel : MonoBehaviour
     public void Buy()
     {
         if (merchant == null || foodRow == null || fenceRow == null) return;
-        if (merchant.TryBuyCart(0, 0, 0, foodRow.Quantity, fenceRow.Quantity)) ResetSelection();
+        if (merchant.TryBuyCart(0, 0, 0, foodRow.Quantity, fenceRow.Quantity))
+        {
+            AudioManager.Play(SoundCue.ShopPurchase);
+            ResetSelection();
+        }
     }
 
     public void Refresh()

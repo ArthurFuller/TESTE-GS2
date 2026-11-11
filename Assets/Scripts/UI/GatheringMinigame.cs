@@ -186,6 +186,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (completed == null || resolving) return;
         if (fishing)
         {
+            AudioManager.Play(SoundCue.FishingPull);
             fishingProgress = Mathf.Min(1f, fishingProgress + fishingClickGain /
                 (fishingPlus ? fishingPlusDifficulty : 1f));
             UpdateFishingFill();
@@ -203,6 +204,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (hit)
         {
             hits++;
+            AudioManager.Play(SoundCue.WoodHit);
             woodHit?.Invoke();
             bar.DOKill();
             bar.anchoredPosition = barLayout.Position;
@@ -211,6 +213,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         }
         else
         {
+            AudioManager.Play(SoundCue.WoodMiss);
             bar.DOKill();
             bar.anchoredPosition = barLayout.Position;
             bar.DOShakeAnchorPos(0.22f, missShakeStrength, 12, 90f, false, true);
@@ -254,6 +257,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (active == fishingTensionStarted) return;
         fishingTensionStarted = active;
         fishingTensionChanged?.Invoke(active);
+        if (active) AudioManager.Play(SoundCue.FishingTension);
     }
 
     private void StartWoodRound()
@@ -348,6 +352,8 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void Complete(int rating)
     {
+        if (fishing)
+            AudioManager.Play(rating > 0 ? SoundCue.FishingCaught : SoundCue.FishingFailed);
         Action<int> callback = completed;
         completed = null;
         woodHit = null;

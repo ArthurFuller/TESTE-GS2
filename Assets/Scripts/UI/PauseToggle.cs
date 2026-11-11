@@ -27,6 +27,7 @@ public sealed class PauseToggle : MonoBehaviour
     public void Toggle()
     {
         paused = !paused;
+        AudioManager.Play(paused ? SoundCue.PanelOpen : SoundCue.PanelClose);
         Time.timeScale = paused ? 0f : 1f;
         UpdateDisplay();
     }

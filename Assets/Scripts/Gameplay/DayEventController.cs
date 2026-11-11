@@ -188,7 +188,17 @@ public sealed class DayEventController : MonoBehaviour
         eventsByDay[day] = activeToday;
         lastAnnounced = announced;
         if (announced != SertaoEventKind.None && card != null)
+        {
             card.Show(Title(announced), Description(announced), Art(announced));
+            switch (announced)
+            {
+                case SertaoEventKind.Drought: AudioManager.Play(SoundCue.EventDrought); break;
+                case SertaoEventKind.Rain: AudioManager.Play(SoundCue.EventRain); break;
+                case SertaoEventKind.Pests: AudioManager.Play(SoundCue.EventPests); break;
+                case SertaoEventKind.Comadre: AudioManager.Play(SoundCue.EventComadre); break;
+                case SertaoEventKind.HeadOfCuia: AudioManager.Play(SoundCue.EventHeadOfCuia); break;
+            }
+        }
     }
 
     private Sprite Art(SertaoEventKind kind) => kind switch

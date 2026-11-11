@@ -268,6 +268,7 @@ public sealed class ActionResolver : MonoBehaviour
         if (activity == ActivityKind.Coffee)
         {
             worker.GrantCoffeeAction();
+            AudioManager.Play(SoundCue.Coffee);
             worker.Select();
             worker.SetStatus("ação extra disponível");
             RecordCard(activity, worker, card);
@@ -290,6 +291,7 @@ public sealed class ActionResolver : MonoBehaviour
             CommitAction(worker, activity, activityName, card);
             worker.SetStatus("lançando moeda");
             feedback.ShowMessage("Moeda no ar...");
+            AudioManager.Play(SoundCue.GambleSpin);
             busyWorkers++;
             Sequence toss = DOTween.Sequence();
             toss.AppendInterval(coinTossDuration);
@@ -305,6 +307,7 @@ public sealed class ActionResolver : MonoBehaviour
                 }
                 else resources.TrySpendCoins(gambleStake);
                 worker.SetStatus(won ? "aposta vencida" : "aposta perdida");
+                AudioManager.Play(won ? SoundCue.GambleWin : SoundCue.GambleLose);
                 feedback.ShowMessage(won ? "Jogo do Bicho: +" + gambleStake + " moedas líquidas." :
                     "Jogo do Bicho: -" + gambleStake + " moedas.");
                 SendWorkerHome(worker);
@@ -315,6 +318,7 @@ public sealed class ActionResolver : MonoBehaviour
         {
             CommitAction(worker, activity, activityName, card);
             worker.ScheduleExtraAction();
+            AudioManager.Play(SoundCue.Rest);
             feedback.ShowMessage("Descanso: ação extra amanhã. Alimentação normal hoje.");
             SendWorkerHome(worker);
             return;
@@ -373,6 +377,7 @@ public sealed class ActionResolver : MonoBehaviour
             CardPlayed?.Invoke(dayCycle.CurrentDay, card);
         card?.PrepareDelivery(worker);
         CardUsed?.Invoke(card);
+        AudioManager.Play(SoundCue.CardPlaced);
     }
 
     private static bool CanReplay(ActivityKind activity) =>
@@ -569,6 +574,7 @@ public sealed class ActionResolver : MonoBehaviour
         {
             if (dayCycle.TryRepeatAnimalProduction(out int milk, out int eggs))
                 feedback.ShowMessage("Ração: +" + milk + " leite e +" + eggs + " ovos.");
+            AudioManager.Play(SoundCue.FeedAnimals);
             SendWorkerHome(worker);
         });
     }
@@ -587,6 +593,7 @@ public sealed class ActionResolver : MonoBehaviour
         MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
         {
             plot.PlaceAnimal(animal);
+            AudioManager.Play(animal == AnimalKind.Cow ? SoundCue.CowArrive : SoundCue.ChickenArrive);
             feedback.ShowMessage(animal == AnimalKind.Cow ? "Vaca no cercado." : "Galinha no cercado.");
             SendWorkerHome(worker);
         });
@@ -605,6 +612,7 @@ public sealed class ActionResolver : MonoBehaviour
         MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
         {
             plot.BuildFence();
+            AudioManager.Play(SoundCue.FenceBuilt);
             worker.SetStatus("cerca construída");
             feedback.ShowMessage("Terreno cercado.");
             SendWorkerHome(worker);
@@ -622,7 +630,10 @@ public sealed class ActionResolver : MonoBehaviour
         MoveAndWork(builder, site.ConstructionPosition, plowWorkDuration, () =>
         {
             if (site.Build(dayCycle.CurrentDay))
+            {
+                AudioManager.Play(SoundCue.HouseBuilt);
                 feedback.ShowMessage("Casa construída. O novo trabalhador chegará amanhã.");
+            }
             SendWorkerHome(builder);
         });
     }
@@ -664,9 +675,14 @@ public sealed class ActionResolver : MonoBehaviour
             Plot target = targets[index];
             MoveAndWork(worker, target.WorkPosition, plowWorkDuration, () =>
             {
-                if (activity == ActivityKind.Fertilizer) target.Fertilize();
+                if (activity == ActivityKind.Fertilizer)
+                {
+                    target.Fertilize();
+                    AudioManager.Play(SoundCue.Fertilize);
+                }
                 else
                 {
+                    AudioManager.Play(SoundCue.Water);
                     target.AdvanceGrowth(1);
                     target.RefreshGrowth(dayCycle.CurrentDay, seedCatalog);
                 }
@@ -688,6 +704,7 @@ public sealed class ActionResolver : MonoBehaviour
         MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
         {
             plot.Plow();
+            AudioManager.Play(SoundCue.Plow);
             PlotsPlowedToday++;
             worker.SetStatus("terreno arado");
             feedback.ShowMessage("Terreno preparado para plantio.");
@@ -713,6 +730,7 @@ public sealed class ActionResolver : MonoBehaviour
         MoveAndWork(worker, plot.WorkPosition, plowWorkDuration, () =>
         {
             plot.Plant(crop, dayCycle.CurrentDay, seedCatalog);
+            AudioManager.Play(SoundCue.Plant);
             worker.SetStatus("plantio concluído");
             feedback.ShowMessage(seedCatalog.Get(crop).displayName + " plantado.");
             SendWorkerHome(worker);
@@ -750,6 +768,7 @@ public sealed class ActionResolver : MonoBehaviour
             {
                 int harvestYield = target.HarvestYield(dayCycle.CurrentDay, seedCatalog);
                 CropType crop = target.Harvest();
+                AudioManager.Play(SoundCue.Harvest);
                 CropSettings settings = seedCatalog.Get(crop);
                 int gained = Mathf.Max(0, harvestYield - worker.ProductionReduction -
                     (dayEvents != null ? dayEvents.HarvestReduction : 0));
@@ -792,6 +811,7 @@ public sealed class ActionResolver : MonoBehaviour
         WorkAtStation(worker, foodPreparationDuration, () =>
         {
             resources.AddFood(preparedFood);
+            AudioManager.Play(SoundCue.FoodPrepared);
             if (resourceHud != null) resourceHud.FlyFromWorld(ResourceKind.Food,
                 preparedFood, worker.transform.position + Vector3.up);
             FoodGainedToday += preparedFood;

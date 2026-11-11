@@ -160,6 +160,7 @@ public sealed class FeedingMinigame : MonoBehaviour
         if (target < 0 || !Consume(icon.Kind)) return null;
         reservedIcon = null;
         chosenFood[target] = icon.Kind;
+        AudioManager.Play(SoundCue.FeedingAssigned);
         RectTransform worker = workerTargets[target];
         worker.DOKill();
         worker.localScale = Vector3.one;
@@ -261,6 +262,7 @@ public sealed class FeedingMinigame : MonoBehaviour
         foreach (FeedingFoodIcon icon in foodIcons)
             if (icon != null) icon.StopAnimation();
         Hide();
+        AudioManager.Play(SoundCue.FeedingCompleted);
         Action<SaleItem?[]> callback = completed;
         completed = null;
         cancelled = null;

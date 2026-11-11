@@ -100,6 +100,7 @@ public sealed class ForestTreeFall : MonoBehaviour
         fall.OnComplete(() =>
         {
             LastImpactPosition = selected.canopy.position;
+            AudioManager.Play(SoundCue.TreeFall);
             onImpact?.Invoke();
         });
         selected.tween = fall;

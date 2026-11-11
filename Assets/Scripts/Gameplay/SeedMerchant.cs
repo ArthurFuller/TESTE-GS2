@@ -106,6 +106,7 @@ public sealed class SeedMerchant : MonoBehaviour
         if (activeMissionsPanel != null) activeMissionsPanel.Close();
         if (timeline != null) timeline.ClosePanel();
         if (shopTabs != null) shopTabs.ShowDefault(true);
+        AudioManager.Play(SoundCue.PanelOpen);
         shopGroup.transform.SetAsLastSibling();
         shopGroup.DOKill();
         shopGroup.blocksRaycasts = true;
@@ -117,6 +118,7 @@ public sealed class SeedMerchant : MonoBehaviour
     public void HideShop()
     {
         if (shopGroup == null) return;
+        if (IsOpen) AudioManager.Play(SoundCue.PanelClose);
         shopGroup.DOKill();
         shopGroup.blocksRaycasts = false;
         shopGroup.interactable = false;

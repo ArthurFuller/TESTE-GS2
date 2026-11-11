@@ -254,6 +254,7 @@ public sealed class CardRewardChoice : MonoBehaviour
         if (alternatives.Count == 0) return;
         offered[index] = alternatives[UnityEngine.Random.Range(0, alternatives.Count)];
         rerolled[index] = true;
+        AudioManager.Play(SoundCue.CardReroll);
         ShowChoice(index);
         if (choiceCards[index] != null)
             choiceCards[index].DOPunchScale(Vector3.one * 0.08f, 0.22f);
@@ -283,6 +284,7 @@ public sealed class CardRewardChoice : MonoBehaviour
         if (completed == null || index < 0 || index >= 2 || offered[index] == null) return;
         if (!hand.QueueRewardCard(offered[index].Kind)) return;
         chosenKinds.Add(offered[index].Kind);
+        AudioManager.Play(SoundCue.CardReward);
         Hide();
         Action callback = completed;
         completed = null;

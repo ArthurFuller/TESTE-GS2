@@ -15,7 +15,7 @@ public sealed class ShopTabs : MonoBehaviour
     {
         if (buyTab != null) buyTab.interactable = marketOpen;
         if (sellTab != null) sellTab.interactable = marketOpen;
-        Select(marketOpen ? buyPage : ordersPage);
+        Select(marketOpen ? buyPage : ordersPage, false);
     }
 
     public void ShowBuy() => Select(buyPage);
@@ -26,8 +26,9 @@ public sealed class ShopTabs : MonoBehaviour
     }
     public void ShowOrders() => Select(ordersPage);
 
-    private void Select(CanvasGroup selected)
+    private void Select(CanvasGroup selected, bool playSound = true)
     {
+        if (playSound) AudioManager.Play(SoundCue.PanelOpen);
         SetPage(buyPage, selected == buyPage);
         SetPage(sellPage, selected == sellPage);
         SetPage(ordersPage, selected == ordersPage);

@@ -88,6 +88,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
     {
         if (!pressedEligible || animating) return;
         pressedEligible = false;
+        AudioManager.Play(SoundCue.UiClick);
         animating = true;
         animationStartedFrame = Time.frameCount;
         rect.DOKill();
@@ -113,6 +114,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
     public void ShakeRejected()
     {
         if (rect == null || BlocksNewClicks) return;
+        AudioManager.Play(SoundCue.UiRejected);
         pressedEligible = false;
         rect.DOKill();
         animating = true;

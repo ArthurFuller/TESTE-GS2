@@ -92,6 +92,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
         DeliveryMission mission = missions[selectedIndex];
         if (mission.accepted) return;
         mission.accepted = true;
+        AudioManager.Play(SoundCue.MissionAccepted);
         if (feedback != null) feedback.ShowMessage("Pedido aceito: " + mission.title);
         Refresh();
     }
@@ -123,6 +124,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             return;
         }
         resources.AddCoins(mission.coinReward);
+        AudioManager.Play(SoundCue.MissionDelivered);
         if (resourceHud != null && deliverButton != null)
             resourceHud.FlyFromRect(ResourceKind.Coins, mission.coinReward,
                 deliverButton.transform as RectTransform);
@@ -136,6 +138,7 @@ public sealed class DeliveryMissionBoard : MonoBehaviour
             {
                 communityDeliveries = 0;
                 housesRewarded++;
+                AudioManager.Play(SoundCue.NewHouseCard);
                 if (feedback != null) feedback.ShowMessage("Comunidade: carta de casa recebida!");
             }
         }
