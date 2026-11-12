@@ -15,13 +15,23 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     [Header("Teste visual 2D")]
     [SerializeField] private Sprite testSprite;
     [SerializeField, Min(0.1f)] private float testSpriteHeight = 1.9f;
+    [Header("Percurso da casa (ajustável em Play Mode)")]
+    [SerializeField] private Transform homeMarker;
+    [SerializeField] private Transform outsideMarker;
+    [SerializeField] private Transform doorwayMarker;
+    [SerializeField, Range(0.05f, 1f)] private float indoorScale = 0.4f;
 
     public static WorkerAssignment Selected { get; private set; }
-    public bool UsedToday => IsUnavailableToday || actionsRemaining <= 0;
+    public bool UsedToday => HousePreviewActive || IsUnavailableToday || actionsRemaining <= 0;
+    public bool HousePreviewActive { get; set; }
+    public Transform SpriteVisual => spriteVisual;
     public int ActionsRemaining => actionsRemaining;
     public ActivityKind? LastActivity { get; private set; }
     public bool IsUnavailableToday { get; private set; }
-    public Vector3 HomePosition { get; private set; }
+    public Vector3 HomePosition => homeMarker != null ? homeMarker.position : initialHomePosition;
+    public Transform OutsideMarker => outsideMarker;
+    public Transform DoorwayMarker => doorwayMarker;
+    public float IndoorScale => indoorScale;
     public int ProductionReduction { get; private set; }
     public WorkProgress Progress => workProgress;
     public string DisplayName => workerName;
@@ -38,10 +48,15 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private Transform actionDotsRoot;
     private ParticleSystem comadreDizzy;
     private Transform spriteVisual;
+    private Camera spriteCamera;
+    private Vector3 initialHomePosition;
 
     private void Awake()
     {
-        HomePosition = transform.position;
+        if (homeMarker != null)
+            transform.position = homeMarker.position;
+        initialHomePosition = transform.position;
+        spriteCamera = Camera.main;
         SetupTestSprite();
         if (comadreDizzyPrefab != null)
         {
@@ -56,9 +71,12 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     private void LateUpdate()
     {
-        if (spriteVisual != null && Camera.main != null)
-            // Mantem o sprite em pe: acompanha apenas a direcao horizontal da camera.
-            spriteVisual.rotation = Quaternion.Euler(0f, Camera.main.transform.eulerAngles.y, 0f);
+        if (spriteVisual != null)
+        {
+            if (spriteCamera == null) spriteCamera = Camera.main;
+            if (spriteCamera != null)
+                spriteVisual.rotation = Quaternion.Euler(0f, spriteCamera.transform.eulerAngles.y, 0f);
+        }
         if (actionDotsRoot != null)
             actionDotsRoot.position = transform.position + Vector3.up * 1.65f;
     }
@@ -104,6 +122,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     public void OnPointerClick(PointerEventData eventData)
     {
+        TutorialHints.Once("workers", "Clique em um trabalhador para inspecioná-lo e depois use as cartas para escolher sua tarefa.");
         Select();
     }
 
@@ -140,7 +159,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
             statusText.text = workerName + ": " + status;
     }
 
-    public bool CanAct(ActivityKind activity) => !IsUnavailableToday && actionsRemaining > 0 &&
+    public bool CanAct(ActivityKind activity) => !HousePreviewActive && !IsUnavailableToday && actionsRemaining > 0 &&
         (actionsRemaining > coffeeActions || coffeeExcludedActivity != activity);
 
     public void MarkUsed(string activityName, ActivityKind activity)
@@ -206,8 +225,15 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
         }
         workerName = name;
         if (actionDotsRoot != null) actionDotsRoot.name = "Ações - " + name;
-        HomePosition = transform.position;
+        initialHomePosition = transform.position;
         SetStatus("livre");
+    }
+
+    public void SetHouseRoute(Transform home, Transform outside, Transform doorway)
+    {
+        homeMarker = home;
+        outsideMarker = outside;
+        doorwayMarker = doorway;
     }
 
     public void JoinDuringDay()

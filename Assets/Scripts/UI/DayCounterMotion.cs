@@ -12,6 +12,7 @@ public sealed class DayCounterMotion : MonoBehaviour
     [SerializeField, Min(1f)] private float hoverScale = 1.07f;
 
     private Camera uiCamera;
+    private TopBarAutoHide topBar;
     private Vector3 labelHomeScale;
     private Tween glowMotion;
     private Tween hoverMotion;
@@ -19,6 +20,7 @@ public sealed class DayCounterMotion : MonoBehaviour
 
     private void Awake()
     {
+        topBar = GetComponentInParent<TopBarAutoHide>();
         if (label != null) labelHomeScale = label.localScale;
         if (glow != null) glow.raycastTarget = false;
         Canvas canvas = GetComponentInParent<Canvas>();
@@ -40,23 +42,26 @@ public sealed class DayCounterMotion : MonoBehaviour
 
     private void Update()
     {
+        if (Time.timeScale == 0f) return;
         // The parent RectTransform includes large empty areas. Only the visible
         // artwork should activate the hover, not the entire HUD container.
         bool over = hitArea != null && Mouse.current != null &&
             RectTransformUtility.RectangleContainsScreenPoint(
                 hitArea, Mouse.current.position.ReadValue(), uiCamera);
+        if (over && Mouse.current.leftButton.wasPressedThisFrame)
+            topBar?.CloseFromDayCounter();
         if (over == hovering) return;
         hovering = over;
 
         hoverMotion?.Kill();
         if (label != null)
             hoverMotion = label.DOScale(labelHomeScale * (over ? hoverScale : 1f), 0.18f)
-                .SetEase(Ease.OutCubic).SetUpdate(true);
+                .SetEase(Ease.OutCubic);
 
         glowMotion?.Kill();
         if (glow != null)
             glowMotion = glow.DOFade(over ? 0.9f : 0f, over ? 0.18f : 0.22f)
-                .SetEase(Ease.OutSine).SetUpdate(true);
+                .SetEase(Ease.OutSine);
     }
 
     private void OnDisable()

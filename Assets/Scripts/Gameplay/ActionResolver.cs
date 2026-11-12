@@ -30,7 +30,6 @@ public sealed class ActionResolver : MonoBehaviour
     [SerializeField, Range(1, 6)] private int fishingPositions = 4;
     [SerializeField, Min(0.1f)] private float fishingSpacing = 0.55f;
     [SerializeField] private Vector3 fishingShoreOffset = new Vector3(0.25f, 0f, 0f);
-    [SerializeField] private Transform villageExit;
     [SerializeField] private Transform fencePassage;
     [SerializeField, Min(0)] private int woodReward = 2;
     [SerializeField, Min(1)] private int gambleStake = 10;
@@ -70,6 +69,7 @@ public sealed class ActionResolver : MonoBehaviour
     private ActivityCardDrag pendingPlotCard;
     private ActivityKind pendingPlotAction;
     private int busyWorkers;
+    private bool housePreviewBusy;
     private int replayAnimations;
     private WorkerAssignment pendingFoodWorker;
     private ActivityCardDrag pendingFoodCard;
@@ -83,7 +83,7 @@ public sealed class ActionResolver : MonoBehaviour
     private readonly System.Collections.Generic.HashSet<WorkerAssignment> working = new();
     [SerializeField] private Button cancelSelectionButton;
 
-    public bool IsBusy => busyWorkers > 0 || replayAnimations > 0 || pendingFoodWorker != null ||
+    public bool IsBusy => housePreviewBusy || busyWorkers > 0 || replayAnimations > 0 || pendingFoodWorker != null ||
         pendingPlotWorker != null ||
         HasGatheringWorker(forestTasks) || HasGatheringWorker(fishingTasks);
     public bool HasPendingSelection => pendingPlotWorker != null;
@@ -99,6 +99,8 @@ public sealed class ActionResolver : MonoBehaviour
     public event System.Action<ActivityCardDrag> CardUsed;
     public event System.Action<int, ActivityCardDrag> CardPlayed;
     public int AssignmentVersion { get; private set; }
+
+    public void SetHousePreviewBusy(bool busy) => housePreviewBusy = busy;
 
     private void Awake()
     {
@@ -465,7 +467,7 @@ public sealed class ActionResolver : MonoBehaviour
     private void StartGathering(GatheringTask task, WorkerAssignment worker, ActivityKind activity, string activityName,
         ActivityCardDrag card)
     {
-        if (task == null || task.Destination == null || villageExit == null ||
+        if (task == null || task.Destination == null ||
             fencePassage == null || resources == null)
         {
             feedback.ShowMessage("Destino ou recursos não configurados.");
@@ -771,7 +773,7 @@ public sealed class ActionResolver : MonoBehaviour
                 AudioManager.Play(SoundCue.Harvest);
                 CropSettings settings = seedCatalog.Get(crop);
                 int gained = Mathf.Max(0, harvestYield - worker.ProductionReduction -
-                    (dayEvents != null ? dayEvents.HarvestReduction : 0));
+                    (dayEvents != null ? dayEvents.HarvestReductionFor(crop) : 0));
                 resources.AddCrop(crop, gained);
                 if (resourceHud != null)
                 {
@@ -910,13 +912,21 @@ public sealed class ActionResolver : MonoBehaviour
     public void BringWorkerOutOfHouse(WorkerAssignment worker, Vector3 doorwayPosition)
     {
         if (worker == null) return;
-        worker.transform.position = doorwayPosition;
+        Vector3 door = worker.DoorwayMarker != null ? worker.DoorwayMarker.position : doorwayPosition;
+        Vector3 outside = worker.OutsideMarker != null ? worker.OutsideMarker.position : door;
+        worker.transform.position = door;
         worker.SetStatus("saindo de casa");
-        Vector3 outsideDoor = doorwayPosition + Vector3.back * 0.6f;
-        Vector3 besideHouse = new Vector3(worker.HomePosition.x, outsideDoor.y, outsideDoor.z);
-        MoveAlongRoute(worker, new[] { outsideDoor, besideHouse, worker.HomePosition },
-            () => worker.SetStatus("em casa"));
-        returningHome.Add(worker);
+        Transform visual = worker.SpriteVisual;
+        Vector3 outdoorScale = visual != null ? visual.localScale : Vector3.one;
+        if (visual != null) visual.localScale = outdoorScale * worker.IndoorScale;
+        MoveAlongRoute(worker, new[] { outside }, () =>
+        {
+            void FinishExit() => MoveAlongRoute(worker, new[] { worker.HomePosition },
+                () => worker.SetStatus("em casa"), false);
+            if (visual != null)
+                visual.DOScale(outdoorScale, 0.3f).SetEase(Ease.OutBack).OnComplete(FinishExit);
+            else FinishExit();
+        }, false);
     }
 
     private void SendWorkerHome(WorkerAssignment worker)
@@ -928,7 +938,7 @@ public sealed class ActionResolver : MonoBehaviour
             return;
         }
         worker.SetStatus("voltando para casa");
-        MoveViaVillagePath(worker, worker.HomePosition, () => worker.SetStatus("em casa"), false);
+        MoveWorker(worker, worker.HomePosition, () => worker.SetStatus("em casa"), false, true);
     }
 
     private void MoveAndWork(WorkerAssignment worker, Vector3 destination, float workDuration, System.Action onFinished)
@@ -940,33 +950,7 @@ public sealed class ActionResolver : MonoBehaviour
             return;
         }
         worker.SetStatus("caminhando");
-        MoveViaVillagePath(worker, destination, () => WorkAtStation(worker, workDuration, onFinished));
-    }
-
-    private void MoveViaVillagePath(WorkerAssignment worker, Vector3 destination,
-        System.Action onArrived, bool countAsBusy = true)
-    {
-        if (villageExit == null)
-        {
-            MoveWorker(worker, destination, onArrived, countAsBusy, !countAsBusy);
-            return;
-        }
-        var route = new System.Collections.Generic.List<Vector3>();
-        Vector3 from = worker.transform.position;
-        if (fencePassage != null && from.x < fencePassage.position.x - 0.1f &&
-            destination.x > fencePassage.position.x)
-        {
-            route.Add(fencePassage.position);
-            from = villageExit.position;
-            route.Add(from);
-        }
-        float pathZ = villageExit.position.z;
-        Vector3 onPath = new Vector3(from.x, from.y, pathZ);
-        if (Vector3.Distance(from, onPath) > 0.05f) route.Add(onPath);
-        Vector3 atDestination = new Vector3(destination.x, destination.y, pathZ);
-        if (Vector3.Distance(onPath, atDestination) > 0.05f) route.Add(atDestination);
-        route.Add(destination);
-        MoveAlongRoute(worker, route.ToArray(), onArrived, countAsBusy);
+        MoveWorker(worker, destination, () => WorkAtStation(worker, workDuration, onFinished));
     }
 
     private void WorkAtStation(WorkerAssignment worker, float workDuration, System.Action onFinished)
@@ -974,7 +958,16 @@ public sealed class ActionResolver : MonoBehaviour
         busyWorkers++;
         working.Add(worker);
         worker.SetStatus("trabalhando");
-        if (worker.Progress != null) worker.Progress.Show();
+        bool soilWork = worker.LastActivity.HasValue &&
+            (worker.LastActivity.Value == ActivityKind.Plow ||
+             worker.LastActivity.Value == ActivityKind.PlantCorn ||
+             worker.LastActivity.Value == ActivityKind.PlantPumpkin ||
+             worker.LastActivity.Value == ActivityKind.PlantJerimum ||
+             worker.LastActivity.Value == ActivityKind.BuildFence ||
+             worker.LastActivity.Value == ActivityKind.Harvest ||
+             worker.LastActivity.Value == ActivityKind.Fertilizer ||
+             worker.LastActivity.Value == ActivityKind.WateringCan);
+        if (worker.Progress != null) worker.Progress.Show(soilWork);
         float progress = 0;
         DOTween.To(() => progress, value =>
         {
@@ -993,9 +986,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         WorkerAssignment worker = task.Worker;
         worker.SetStatus("caminhando");
-        Vector3 homePath = new Vector3(worker.transform.position.x,
-            worker.transform.position.y, villageExit.position.z);
-        MoveAlongRoute(worker, new[] { homePath, villageExit.position, fencePassage.position,
+        MoveAlongRoute(worker, new[] { fencePassage.position,
             task.TargetPosition }, () =>
         {
             task.Arrived = true;
@@ -1146,10 +1137,7 @@ public sealed class ActionResolver : MonoBehaviour
     {
         int returnDay = dayCycle.CurrentDay;
         worker.SetStatus("voltando para casa");
-        Vector3 homePath = new Vector3(worker.HomePosition.x,
-            worker.HomePosition.y, villageExit.position.z);
-        MoveAlongRoute(worker, new[] { fencePassage.position, villageExit.position,
-            homePath, worker.HomePosition }, () =>
+        MoveAlongRoute(worker, new[] { fencePassage.position, worker.HomePosition }, () =>
         {
             if (dayCycle.CurrentDay == returnDay) worker.SetStatus("em casa");
         }, false);

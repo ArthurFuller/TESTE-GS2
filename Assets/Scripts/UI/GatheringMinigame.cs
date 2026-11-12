@@ -25,7 +25,6 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float initialFishingProgress = 0.3f;
     [SerializeField, Range(0.01f, 0.5f)] private float fishingClickGain = 0.085f;
     [SerializeField, Min(0.01f)] private float fishingDrainPerSecond = 0.16f;
-    [SerializeField, Min(1f)] private float fishingTimeLimit = 12f;
     [SerializeField, Min(1f)] private float fishingPlusDifficulty = 1.35f;
     [SerializeField, Min(140f)] private float fishingPanelWidth = 190f;
     [SerializeField, Min(0f)] private float fishingVerticalGap = 45f;
@@ -85,6 +84,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         Action onWoodHit = null, Action<bool> onFishingTension = null,
         Action onFishDropped = null)
     {
+        AudioManager.StopFishingPull();
         if (!ResolveReferences())
         {
             Debug.LogError("Minigame sem marcador, faixa verde ou painel configurado.", this);
@@ -166,7 +166,7 @@ public sealed class GatheringMinigame : MonoBehaviour
                 fishingDrainPerSecond * multiplier * struggle * Time.deltaTime);
             UpdateFishingFill();
             CheckFishingTension();
-            if (fishingProgress <= 0f || fishingElapsed >= fishingTimeLimit) FinishWithFeedback(0);
+            if (fishingProgress <= 0f) FinishWithFeedback(0);
             return;
         }
         float proximity = 1f - Mathf.Clamp01(
@@ -186,7 +186,8 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (completed == null || resolving) return;
         if (fishing)
         {
-            AudioManager.Play(SoundCue.FishingPull);
+            if (Time.timeScale <= 0f) return;
+            AudioManager.KeepFishingPullAlive();
             fishingProgress = Mathf.Min(1f, fishingProgress + fishingClickGain /
                 (fishingPlus ? fishingPlusDifficulty : 1f));
             UpdateFishingFill();
@@ -225,6 +226,7 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void FinishWithFeedback(int rating)
     {
+        AudioManager.StopFishingPull();
         resolving = true;
         fishingTensionStarted = false;
         fishingTensionChanged?.Invoke(false);
@@ -257,7 +259,6 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (active == fishingTensionStarted) return;
         fishingTensionStarted = active;
         fishingTensionChanged?.Invoke(active);
-        if (active) AudioManager.Play(SoundCue.FishingTension);
     }
 
     private void StartWoodRound()
@@ -365,6 +366,7 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void Hide()
     {
+        AudioManager.StopFishingPull();
         if (group == null) return;
         group.alpha = 0f;
         group.interactable = false;

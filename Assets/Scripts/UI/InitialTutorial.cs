@@ -12,17 +12,30 @@ public sealed class InitialTutorial : MonoBehaviour
 
     private bool[] previousButtonStates;
     private bool visible;
+    public const string SkipKey = "GS2.SkipTutorial";
+    public static bool SkipRequested
+    {
+        get => PlayerPrefs.GetInt(SkipKey, 0) != 0;
+        set { PlayerPrefs.SetInt(SkipKey, value ? 1 : 0); PlayerPrefs.Save(); }
+    }
 
     private void Awake()
     {
         previousButtonStates = new bool[disabledDuringTutorial.Length];
         if (continueButton != null) continueButton.onClick.AddListener(Close);
-        Show(firstDescription);
+        if (!SkipRequested) Show(firstDescription);
+        else SetVisible(false);
     }
 
     private void OnDestroy()
     {
         if (continueButton != null) continueButton.onClick.RemoveListener(Close);
+    }
+
+    public void Skip()
+    {
+        SkipRequested = true;
+        Close();
     }
 
     public void Close()
@@ -37,6 +50,7 @@ public sealed class InitialTutorial : MonoBehaviour
 
     public void Show(string text)
     {
+        if (SkipRequested) return;
         if (description != null) description.text = text;
         if (!visible)
             for (int i = 0; i < disabledDuringTutorial.Length; i++)

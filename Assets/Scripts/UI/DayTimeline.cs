@@ -198,6 +198,7 @@ public sealed class DayTimeline : MonoBehaviour
 
     private void Update()
     {
+        if (Time.timeScale == 0f) return;
         if (inspectionCard != null && Keyboard.current != null &&
             Keyboard.current.escapeKey.wasPressedThisFrame)
             CloseInspection(false);

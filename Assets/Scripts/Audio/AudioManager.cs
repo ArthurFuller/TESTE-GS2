@@ -18,6 +18,10 @@ public sealed class AudioManager : MonoBehaviour
     [SerializeField] private AudioSource musicSource;
     [SerializeField] private AudioSource effectsSource;
     [SerializeField] private AudioSource ambienceSource;
+    [SerializeField] private AudioSource fishingPullSource;
+    [Header("Puxar linha (pesca)")]
+    [SerializeField, Min(0.1f)] private float fishingIdleDelay = 1f;
+    [SerializeField, Range(0.02f, 0.4f)] private float fishingFadeDuration = 0.12f;
     [Header("Biblioteca de efeitos (atribuir clips aqui)")]
     [SerializeField] private CueEntry[] effects = Array.Empty<CueEntry>();
 
@@ -32,6 +36,9 @@ public sealed class AudioManager : MonoBehaviour
     private float effectsVolume;
     private bool musicMuted;
     private bool effectsMuted;
+    private float fishingPullUntil;
+    private float fishingPullFade;
+    private float fishingPullCueVolume = 1f;
 
     public static AudioManager Instance { get; private set; }
     public float MusicVolume => musicVolume;
@@ -58,6 +65,20 @@ public sealed class AudioManager : MonoBehaviour
         if (musicSource != null) { musicSource.loop = true; musicSource.spatialBlend = 0f; }
         if (effectsSource != null) { effectsSource.loop = false; effectsSource.spatialBlend = 0f; }
         if (ambienceSource != null) { ambienceSource.loop = true; ambienceSource.spatialBlend = 0f; }
+        if (fishingPullSource != null)
+        {
+            fishingPullSource.loop = true;
+            fishingPullSource.playOnAwake = false;
+            fishingPullSource.spatialBlend = 0f;
+            if (entries.TryGetValue(SoundCue.FishingPull, out CueEntry pull))
+            {
+                fishingPullCueVolume = pull.volume;
+                if (fishingPullSource.clip == null && pull.clips != null)
+                    foreach (AudioClip clip in pull.clips)
+                        if (clip != null) { fishingPullSource.clip = clip; break; }
+            }
+            fishingPullSource.Stop();
+        }
         ApplyVolumes();
     }
 
@@ -68,6 +89,39 @@ public sealed class AudioManager : MonoBehaviour
             musicSource.Play();
         if (ambienceSource != null && ambienceSource.clip != null && !ambienceSource.isPlaying)
             ambienceSource.Play();
+    }
+
+    // A pesca mantém um único som em loop enquanto o jogador continua puxando.
+    public static void KeepFishingPullAlive()
+    {
+        if (Instance == null || !Instance.isActiveAndEnabled) return;
+        Instance.RefreshFishingPull();
+    }
+
+    public static void StopFishingPull()
+    {
+        if (Instance != null) Instance.fishingPullUntil = 0f;
+    }
+
+    private void RefreshFishingPull()
+    {
+        if (fishingPullSource == null || fishingPullSource.clip == null ||
+            effectsMuted || effectsVolume <= 0f || Time.timeScale <= 0f) return;
+        fishingPullUntil = Time.unscaledTime + fishingIdleDelay;
+        if (!fishingPullSource.isPlaying) fishingPullSource.Play();
+    }
+
+    private void Update()
+    {
+        if (fishingPullSource == null) return;
+        if (Time.timeScale <= 0f) fishingPullUntil = 0f;
+        bool active = Time.unscaledTime < fishingPullUntil && !effectsMuted && effectsVolume > 0f;
+        fishingPullFade = Mathf.MoveTowards(fishingPullFade, active ? 1f : 0f,
+            Time.unscaledDeltaTime / Mathf.Max(0.02f, fishingFadeDuration));
+        fishingPullSource.volume = fishingPullFade * fishingPullCueVolume *
+            (effectsMuted ? 0f : effectsVolume);
+        if (!active && fishingPullFade <= 0f && fishingPullSource.isPlaying)
+            fishingPullSource.Stop();
     }
 
     public static void Play(SoundCue cue)
@@ -105,6 +159,7 @@ public sealed class AudioManager : MonoBehaviour
     public void SetEffectsVolume(float value)
     {
         effectsVolume = Mathf.Clamp01(value);
+        if (effectsVolume <= 0f) StopFishingPull();
         PlayerPrefs.SetFloat(EffectsKey, effectsVolume);
         ApplyVolumes();
     }
@@ -117,6 +172,7 @@ public sealed class AudioManager : MonoBehaviour
     public void SetEffectsMuted(bool muted)
     {
         effectsMuted = muted;
+        if (muted) StopFishingPull();
         PlayerPrefs.SetInt(EffectsMuteKey, muted ? 1 : 0);
         ApplyVolumes();
     }
@@ -125,10 +181,21 @@ public sealed class AudioManager : MonoBehaviour
         if (musicSource != null) musicSource.volume = musicMuted ? 0f : musicVolume;
         if (effectsSource != null) effectsSource.volume = effectsMuted ? 0f : effectsVolume;
         if (ambienceSource != null) ambienceSource.volume = effectsMuted ? 0f : effectsVolume;
+        if (fishingPullSource != null)
+            fishingPullSource.volume = fishingPullFade * fishingPullCueVolume *
+                (effectsMuted ? 0f : effectsVolume);
     }
     private void OnApplicationPause(bool paused)
     {
-        if (paused) PlayerPrefs.Save();
+        if (!paused) return;
+        StopFishingPull();
+        if (fishingPullSource != null) fishingPullSource.Stop();
+        fishingPullFade = 0f;
+        PlayerPrefs.Save();
+    }
+    private void OnDisable()
+    {
+        if (fishingPullSource != null) fishingPullSource.Stop();
     }
     private void OnDestroy()
     {

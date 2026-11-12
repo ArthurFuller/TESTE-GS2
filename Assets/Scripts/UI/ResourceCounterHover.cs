@@ -50,7 +50,7 @@ public sealed class ResourceCounterHover : MonoBehaviour
 
     private void Update()
     {
-        if (Mouse.current == null || visibleAlpha == null) return;
+        if (Time.timeScale == 0f || Mouse.current == null || visibleAlpha == null) return;
         Vector2 pointer = Mouse.current.position.ReadValue();
         int current = -1;
         float nearest = float.PositiveInfinity;

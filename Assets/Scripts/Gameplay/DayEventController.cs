@@ -50,6 +50,10 @@ public sealed class DayEventController : MonoBehaviour
     [SerializeField, Min(1)] private int eventDurationDays = 2;
     [SerializeField, Min(0)] private int droughtFishingReduction = 1;
     [SerializeField, Min(0)] private int pestHarvestReduction = 1;
+    [Header("Pragas na macaxeira - configurar apos definir balanceamento")]
+    [SerializeField, Min(0)] private int cassavaRegressionWithoutProtection;
+    [SerializeField, Min(0)] private int cassavaRegressionWithJerimum;
+    [SerializeField, Min(0)] private int cassavaRegressionWithJerimumAndCow;
     [SerializeField, Min(0)] private int droughtGrowthDelay = 1;
     [SerializeField, Min(0)] private int rainGrowthBonus = 1;
     [SerializeField, Min(1)] private int forestExploitationThreshold = 6;
@@ -62,6 +66,14 @@ public sealed class DayEventController : MonoBehaviour
     private SertaoEventKind lastAnnounced;
     private int forestExploitation;
     private int stolenFishToday;
+    private CropType pestTarget = CropType.None;
+    public bool IsRaining => IsActive(SertaoEventKind.Rain);
+    public bool IsDrought => IsActive(SertaoEventKind.Drought);
+    public event System.Action WeatherChanged;
+    public CropType PestTarget => pestTarget;
+    public int HarvestReductionFor(CropType crop) =>
+        crop != CropType.None && crop == pestTarget && IsActive(SertaoEventKind.Pests)
+            ? pestHarvestReduction : 0;
     private readonly List<ActiveComadre> activeComadre = new();
     private readonly Dictionary<int, List<TimelineEvent>> eventsByDay = new();
 
@@ -116,6 +128,7 @@ public sealed class DayEventController : MonoBehaviour
             if (activeComadre[i].DaysRemaining <= 0) activeComadre.RemoveAt(i);
         }
 
+        if (!IsActive(SertaoEventKind.Pests)) pestTarget = CropType.None;
         SertaoEventKind announced = SertaoEventKind.None;
         if (lastAnnounced != SertaoEventKind.Comadre && activeComadre.Count == 0 &&
             forestExploitation >= forestExploitationThreshold && Random.value < comadreChance)
@@ -154,10 +167,17 @@ public sealed class DayEventController : MonoBehaviour
                 resources.TryDeliverFish(stolenFishToday);
             }
             else if (announced != SertaoEventKind.None)
+            {
+                if (announced == SertaoEventKind.Pests)
+                {
+                    pestTarget = SelectAffectedCrop();
+                    ApplyPestRegression();
+                }
                 activeGeneralEvents.Add(new ActiveGeneral
                 {
                     Kind = announced, StartedOn = day, DaysRemaining = eventDurationDays
                 });
+            }
         }
 
         if (IsActive(SertaoEventKind.Drought))
@@ -187,6 +207,7 @@ public sealed class DayEventController : MonoBehaviour
         activeToday.Sort((a, b) => a.StartedOn.CompareTo(b.StartedOn));
         eventsByDay[day] = activeToday;
         lastAnnounced = announced;
+        WeatherChanged?.Invoke();
         if (announced != SertaoEventKind.None && card != null)
         {
             card.Show(Title(announced), Description(announced), Art(announced));
@@ -199,6 +220,32 @@ public sealed class DayEventController : MonoBehaviour
                 case SertaoEventKind.HeadOfCuia: AudioManager.Play(SoundCue.EventHeadOfCuia); break;
             }
         }
+    }
+
+    private void ApplyPestRegression()
+    {
+        if (pestTarget != CropType.Pumpkin || plots == null) return;
+        foreach (Plot plot in plots)
+        {
+            if (plot == null || plot.Crop != CropType.Pumpkin) continue;
+            MandalaCombo combo = MandalaSynergy.Instance != null ?
+                MandalaSynergy.Instance.For(plot) : MandalaCombo.None;
+            int stages = (combo & MandalaCombo.CassavaJerimumCow) != 0 ?
+                cassavaRegressionWithJerimumAndCow :
+                (combo & MandalaCombo.CassavaJerimum) != 0 ?
+                cassavaRegressionWithJerimum : cassavaRegressionWithoutProtection;
+            if (stages > 0) plot.AdvanceGrowth(-stages);
+        }
+    }
+
+    private CropType SelectAffectedCrop()
+    {
+        var options = new List<CropType>();
+        if (plots != null)
+            foreach (Plot plot in plots)
+                if (plot != null && plot.Crop != CropType.None && !options.Contains(plot.Crop))
+                    options.Add(plot.Crop);
+        return options.Count > 0 ? options[Random.Range(0, options.Count)] : CropType.None;
     }
 
     private Sprite Art(SertaoEventKind kind) => kind switch
@@ -224,7 +271,11 @@ public sealed class DayEventController : MonoBehaviour
     private string Description(SertaoEventKind kind) => kind switch
     {
         SertaoEventKind.Drought => "A seca reduz a pesca e atrasa o crescimento. Duração: " + eventDurationDays + " dia(s).",
-        SertaoEventKind.Pests => "As pragas reduzem a colheita. Duração: " + eventDurationDays + " dia(s).",
+        SertaoEventKind.Pests => "As pragas afetam " +
+            (pestTarget == CropType.Pumpkin ? "a macaxeira" :
+             pestTarget == CropType.Corn ? "o milho" :
+             pestTarget == CropType.Jerimum ? "o jerimum" : "as lavouras") +
+            ". Duração: " + eventDurationDays + " dia(s).",
         SertaoEventKind.Rain => "A chuva acelera o crescimento e reduz o impacto da coleta de madeira. Duração: " + eventDurationDays + " dia(s).",
         SertaoEventKind.Calm => "Nenhum novo evento especial começou hoje.",
         SertaoEventKind.HeadOfCuia => "O Cabeça de Cuia roubou " + stolenFishToday +

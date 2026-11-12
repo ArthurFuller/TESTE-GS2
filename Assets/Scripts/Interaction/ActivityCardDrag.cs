@@ -64,17 +64,25 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
                 ActivityKind.PlantJerimum => CropType.Jerimum,
                 _ => CropType.None
             };
-            if (crop == CropType.None) return description;
+            if (crop == CropType.None)
+                return activity == ActivityKind.PlaceCow
+                    ? description + " Vizinhança: ajuda a macaxeira e produz mais leite junto do milho."
+                    : description;
             if (seedCatalog == null) seedCatalog = FindFirstObjectByType<SeedCatalog>();
             if (trading == null) trading = FindFirstObjectByType<InventoryTrading>();
             CropSettings settings = seedCatalog != null ? seedCatalog.Get(crop) : null;
             if (settings == null || trading == null) return description;
             SaleItem item = crop == CropType.Corn ? SaleItem.Corn :
                 crop == CropType.Pumpkin ? SaleItem.Pumpkin : SaleItem.Jerimum;
+            string synergy = crop == CropType.Corn ?
+                " Vizinhança: vacas produzem mais leite." :
+                crop == CropType.Pumpkin ?
+                " Vizinhança: vacas aumentam a colheita; vacas e lago ajudam após atrasos; jerimum reduz perdas por pragas." :
+                " Vizinhança: protege a macaxeira de pragas; com vacas, a proteção aumenta.";
             return "Plante em terreno arado. Cresce em " + settings.growthDays +
                 (settings.growthDays == 1 ? " dia" : " dias") + ", rende " +
                 settings.foodYield + " por colheita e vende por " +
-                trading.GetPrice(item) + " moedas/un.";
+                trading.GetPrice(item) + " moedas/un." + synergy;
         }
     }
     public bool HasEffect => true;
@@ -214,6 +222,11 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         RectTransform rect = (RectTransform)transform;
         rect.DOKill();
         pendingFloat?.Kill();
+        if (activity == ActivityKind.BuildHouse || activity == ActivityKind.BuildFence)
+        {
+            DissolveDisposable(onFinished);
+            return;
+        }
         if (deliveryWorker != null && !replayAnimating)
         {
             AnimateDelivery(rect, deliveryWorker, onFinished);
@@ -235,6 +248,91 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
                 returning = false;
                 onFinished?.Invoke();
             });
+    }
+
+    private void DissolveDisposable(System.Action onFinished)
+    {
+        Canvas canvas = GetComponentInParent<Canvas>();
+        RectTransform canvasRoot = canvas != null ? canvas.rootCanvas.transform as RectTransform : null;
+        Image source = GetComponent<Image>();
+        Shader shader = Resources.Load<Shader>("CardDissolve");
+        if (canvasRoot == null || source == null || shader == null)
+        {
+            returning = false;
+            onFinished?.Invoke();
+            return;
+        }
+
+        RectTransform card = (RectTransform)transform;
+        Vector2 screen = RectTransformUtility.WorldToScreenPoint(canvas.rootCanvas.worldCamera,
+            card.TransformPoint(card.rect.center));
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRoot, screen,
+            canvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null :
+                canvas.rootCanvas.worldCamera, out Vector2 start);
+        var visual = new GameObject("Carta descartada - dissolucao", typeof(RectTransform),
+            typeof(CanvasRenderer), typeof(Image), typeof(CanvasGroup));
+        RectTransform ghost = (RectTransform)visual.transform;
+        ghost.SetParent(canvasRoot, false);
+        ghost.anchorMin = ghost.anchorMax = Vector2.one * 0.5f;
+        ghost.pivot = Vector2.one * 0.5f;
+        ghost.sizeDelta = card.rect.size;
+        ghost.anchoredPosition = start;
+        ghost.localScale = card.lossyScale / canvasRoot.lossyScale.x;
+        Image art = visual.GetComponent<Image>();
+        art.sprite = source.sprite;
+        art.type = source.type;
+        art.color = source.color;
+        art.raycastTarget = false;
+        Material ghostMaterial = new Material(shader);
+        art.material = ghostMaterial;
+        Text title = GetComponentInChildren<Text>(true);
+        CanvasGroup group = visual.GetComponent<CanvasGroup>();
+        group.blocksRaycasts = false;
+        if (title != null)
+        {
+            var label = new GameObject("Titulo", typeof(RectTransform),
+                typeof(CanvasRenderer), typeof(Text));
+            RectTransform tr = (RectTransform)label.transform;
+            tr.SetParent(ghost, false);
+            tr.anchorMin = Vector2.zero;
+            tr.anchorMax = Vector2.one;
+            tr.offsetMin = new Vector2(8f, 6f);
+            tr.offsetMax = new Vector2(-8f, -6f);
+            Text text = label.GetComponent<Text>();
+            text.font = title.font;
+            text.fontSize = title.fontSize;
+            text.alignment = title.alignment;
+            text.text = title.text;
+            text.color = title.color;
+            text.raycastTarget = false;
+        }
+
+        CanvasGroup original = GetComponent<CanvasGroup>();
+        if (original == null) original = gameObject.AddComponent<CanvasGroup>();
+        original.alpha = 0f;
+        original.interactable = false;
+        original.blocksRaycasts = false;
+        bool cleaned = false;
+        void Clean()
+        {
+            if (cleaned) return;
+            cleaned = true;
+            Destroy(ghostMaterial);
+            Destroy(visual);
+        }
+        DOTween.Sequence().SetTarget(ghost)
+            .Append(ghost.DOAnchorPos(Vector2.zero, 0.38f).SetEase(Ease.OutCubic))
+            .Join(ghost.DOScale(ghost.localScale * 1.04f, 0.38f))
+            .Append(DOTween.To(() => ghostMaterial.GetFloat("_Cutoff"),
+                value => ghostMaterial.SetFloat("_Cutoff", value), 1f, 0.34f))
+            .Join(group.DOFade(0f, 0.34f))
+            .OnComplete(() =>
+            {
+                returning = false;
+                Clean();
+                onFinished?.Invoke();
+            })
+            .OnKill(Clean);
     }
 
     public void PrepareDelivery(WorkerAssignment worker)
@@ -512,6 +610,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         else dragWorldOffset = Vector3.zero;
         rect.SetAsLastSibling();
         dragging = true;
+        TutorialHints.Once("cards", "Arraste as cartas até um trabalhador para atribuir ações. Algumas também exigem escolher um terreno.");
         AudioManager.Play(SoundCue.CardPick);
         cancelled = false;
         OnDrag(eventData);

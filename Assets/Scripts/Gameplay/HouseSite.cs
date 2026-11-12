@@ -6,7 +6,14 @@ using UnityEngine.EventSystems;
 public sealed class HouseSite : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
 {
     [SerializeField] private ActionResolver actions;
-    [SerializeField] private Transform houseTemplate;
+    [Tooltip("Visual da Casa 2 deste lote. Fica visível no editor para ajustar o Transform e oculto até a construção durante o jogo.")]
+    [SerializeField] private Transform houseVisualPreview;
+    [Tooltip("Ponto editável da porta deste lote, usado para a saída do novo morador.")]
+    [SerializeField] private Transform doorwayMarker;
+    [Tooltip("Ponto externo logo depois da porta; ajuste para a direção real da entrada.")]
+    [SerializeField] private Transform outsideMarker;
+    [Tooltip("Origem e destino habitual do morador desta casa.")]
+    [SerializeField] private Transform homeMarker;
     [SerializeField] private WorkerAssignment workerTemplate;
     [SerializeField, Min(3)] private int houseNumber = 3;
     [SerializeField] private Vector3 workerOffset = new Vector3(0.9f, 0f, -0.95f);
@@ -15,16 +22,13 @@ public sealed class HouseSite : MonoBehaviour, IPointerClickHandler, IPointerEnt
     public bool IsBuilt { get; private set; }
     private int builtDay;
     private bool residentCreated;
-    private Transform doorway;
     private bool pointerOver;
     private Transform selectionOutline;
     private Mesh selectionMesh;
     private Material selectionMaterial;
     private static readonly List<HouseSite> allSites = new List<HouseSite>();
 
-    public Vector3 DoorwayPosition => doorway != null
-        ? new Vector3(doorway.position.x, transform.position.y, doorway.position.z + 0.25f)
-        : transform.position;
+    public Vector3 DoorwayPosition => doorwayMarker != null ? doorwayMarker.position : transform.position;
 
     public Vector3 ConstructionPosition
     {
@@ -34,6 +38,12 @@ public sealed class HouseSite : MonoBehaviour, IPointerClickHandler, IPointerEnt
             float distance = (lot != null ? lot.bounds.extents.x : 0.8f) + builderClearance;
             return transform.position + Vector3.right * distance;
         }
+    }
+
+    private void Awake()
+    {
+        if (Application.isPlaying && houseVisualPreview != null)
+            houseVisualPreview.gameObject.SetActive(false);
     }
 
     public void OnPointerClick(PointerEventData eventData)
@@ -151,15 +161,12 @@ public sealed class HouseSite : MonoBehaviour, IPointerClickHandler, IPointerEnt
 
     public bool Build(int day)
     {
-        if (IsBuilt || houseTemplate == null || workerTemplate == null) return false;
+        if (IsBuilt || houseVisualPreview == null || doorwayMarker == null ||
+            workerTemplate == null) return false;
         IsBuilt = true;
         SetHighlight(false);
         builtDay = day;
-        Transform house = Instantiate(houseTemplate, houseTemplate.parent);
-        house.name = "Casinha " + houseNumber;
-        Transform templateLot = houseTemplate.Find("Lote da casinha");
-        if (templateLot != null) house.position += transform.position - templateLot.position;
-        doorway = house.Find("Porta");
+        houseVisualPreview.gameObject.SetActive(true);
         Renderer surface = GetComponent<Renderer>();
         if (surface != null) surface.enabled = false;
         Collider target = GetComponent<Collider>();
@@ -173,8 +180,9 @@ public sealed class HouseSite : MonoBehaviour, IPointerClickHandler, IPointerEnt
         residentCreated = true;
         WorkerAssignment worker = Instantiate(workerTemplate, workerTemplate.transform.parent);
         worker.name = "Trabalhador ilustrativo " + houseNumber;
-        worker.transform.position = transform.position + workerOffset;
+        worker.transform.position = homeMarker != null ? homeMarker.position : transform.position + workerOffset;
         worker.ConfigureNewWorker("Trabalhador " + houseNumber);
+        worker.SetHouseRoute(homeMarker, outsideMarker, doorwayMarker);
         return worker;
     }
 }

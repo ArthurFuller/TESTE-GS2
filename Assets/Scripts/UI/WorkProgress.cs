@@ -4,12 +4,18 @@ public sealed class WorkProgress : MonoBehaviour
 {
     [SerializeField] private GameObject barRoot;
     [SerializeField] private Transform fill;
+    [SerializeField] private ParticleSystem workDust;
     [SerializeField, Min(0.01f)] private float fillWidth = 0.84f;
 
-    public void Show()
+    public void Show(bool soilWork = false)
     {
-        if (barRoot != null)
-            barRoot.SetActive(true);
+        if (barRoot != null) barRoot.SetActive(true);
+        if (workDust != null)
+        {
+            if (soilWork && !workDust.isEmitting) workDust.Play();
+            else if (!soilWork && workDust.isEmitting)
+                workDust.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+        }
         SetProgress(0);
     }
 
@@ -28,7 +34,8 @@ public sealed class WorkProgress : MonoBehaviour
 
     public void Hide()
     {
-        if (barRoot != null)
-            barRoot.SetActive(false);
+        if (barRoot != null) barRoot.SetActive(false);
+        if (workDust != null && workDust.isEmitting)
+            workDust.Stop(true, ParticleSystemStopBehavior.StopEmitting);
     }
 }

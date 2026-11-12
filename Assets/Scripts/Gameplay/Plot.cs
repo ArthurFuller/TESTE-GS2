@@ -11,12 +11,16 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     [SerializeField] private ActionResolver actionResolver;
     [SerializeField] private Renderer surfaceRenderer;
     [SerializeField] private Material plowedMaterial;
+    [SerializeField] private GameObject plowedVisual; // Visual opcional: mantém o solo lógico e collider.
+    [SerializeField, Tooltip("Slot de água: bloqueia ações de cultivo, cercas e animais.")]
+    private bool isWater;
     [SerializeField] private GameObject cornVisual;
     [SerializeField] private GameObject pumpkinVisual;
     [SerializeField] private Color jerimumColor = new Color(0.92f, 0.42f, 0.08f);
     [SerializeField, Min(0.1f)] private float adjacentDistance = 2.5f;
     [SerializeField] private GameObject growthBar;
     [SerializeField] private GameObject[] fenceParts;
+    [SerializeField] private GameObject joinedFenceModel; // Modelo FBX para cercas unificadas.
     [SerializeField, Min(0f)] private float fencePieceDelay = 0.06f;
     [SerializeField, Min(0.01f)] private float fencePieceDuration = 0.28f;
     [SerializeField] private Transform growthFill;
@@ -25,6 +29,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public bool IsPlowed { get; private set; }
     public bool IsFenced { get; private set; }
+    public bool IsWater => isWater;
     public CropType Crop { get; private set; }
     public AnimalKind Animal { get; private set; }
     public int PlantedDay { get; private set; }
@@ -47,8 +52,18 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
     private static readonly List<Plot> allPlots = new List<Plot>();
     private static readonly Dictionary<string, JoinedVisual> joinedVisuals =
         new Dictionary<string, JoinedVisual>();
-    public bool IsEmpty => Crop == CropType.None;
+    public bool IsEmpty => !isWater && Crop == CropType.None;
     public Vector3 WorkPosition => transform.position + Vector3.back * workClearance;
+    // Mesma regra de vizinhança ortogonal usada pelos cercados.
+    public bool IsAdjacentTo(Plot other)
+    {
+        if (other == null || other == this) return false;
+        Vector3 d = other.transform.position - transform.position;
+        if (Mathf.Abs(d.y) >= 0.2f) return false;
+        return (Mathf.Abs(d.x) < 0.2f && Mathf.Abs(d.z) < adjacentDistance && Mathf.Abs(d.z) > 0.2f) ||
+               (Mathf.Abs(d.z) < 0.2f && Mathf.Abs(d.x) < adjacentDistance && Mathf.Abs(d.x) > 0.2f);
+    }
+
     public event Action StateChanged;
 
     private void Awake()
@@ -75,6 +90,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
                 fenceBaseScales[i] = fenceParts[i].transform.localScale;
             }
         }
+        if (plowedVisual != null) plowedVisual.SetActive(false);
     }
 
     private void OnEnable() => allPlots.Add(this);
@@ -97,6 +113,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public void OnPointerEnter(PointerEventData eventData)
     {
+        if (isWater) return;
         pointerOver = true;
         PulseOutline();
         joinedVisual?.SetHovered(true);
@@ -111,6 +128,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public bool CanUse(ActivityKind activity, int currentDay, SeedCatalog catalog)
     {
+        if (isWater) return false;
         return activity switch
         {
             ActivityKind.Plow or ActivityKind.BuildFence =>
@@ -222,23 +240,26 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public void OnPointerClick(PointerEventData eventData)
     {
+        if (isWater) return;
+        TutorialHints.Once("plots", "Use os terrenos destacados para arar, plantar, cercar ou cuidar das culturas.");
         if (actionResolver != null)
             actionResolver.TryUsePlot(this);
     }
 
     public void Plow()
     {
-        if (IsPlowed || IsFenced || Animal != AnimalKind.None)
+        if (isWater || IsPlowed || IsFenced || Animal != AnimalKind.None)
             return;
         IsPlowed = true;
         if (surfaceRenderer != null && plowedMaterial != null)
             surfaceRenderer.sharedMaterial = plowedMaterial;
+        RefreshSurfaceVisual();
         StateChanged?.Invoke();
     }
 
     public void Plant(CropType crop, int currentDay, SeedCatalog catalog)
     {
-        if (!IsPlowed || IsFenced || !IsEmpty || Animal != AnimalKind.None || crop == CropType.None)
+        if (isWater || !IsPlowed || IsFenced || !IsEmpty || Animal != AnimalKind.None || crop == CropType.None)
             return;
         Crop = crop;
         PlantedDay = currentDay;
@@ -305,7 +326,9 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         CropSettings settings = catalog != null ? catalog.Get(Crop) : null;
         return settings == null ? 0 : (settings.foodYield +
             Mathf.Max(0, currentDay + growthAdjustment - PlantedDay - settings.growthDays) *
-            settings.bonusYieldPerExtraDay) * (fertilized ? 2 : 1);
+            settings.bonusYieldPerExtraDay) * (fertilized ? 2 : 1) +
+            (Crop == CropType.Pumpkin && MandalaSynergy.Instance != null ?
+                MandalaSynergy.Instance.ExtraCassavaYield(this) : 0);
     }
 
     public void RefreshGrowth(int currentDay, SeedCatalog catalog)
@@ -350,6 +373,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public CropType Harvest()
     {
+        if (isWater) return CropType.None;
         CropType harvested = Crop;
         Crop = CropType.None;
         fertilized = false;
@@ -367,16 +391,25 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         StateChanged?.Invoke();
     }
 
+    public void AdvanceGrowthTowardMaturity(int days, int currentDay, SeedCatalog catalog)
+    {
+        if (isWater || Crop == CropType.None || days <= 0 || catalog == null) return;
+        CropSettings settings = catalog.Get(Crop);
+        if (settings == null) return;
+        int remaining = settings.growthDays - (currentDay + growthAdjustment - PlantedDay);
+        if (remaining > 0) AdvanceGrowth(Mathf.Min(days, remaining));
+    }
+
     public void Fertilize()
     {
-        if (Crop == CropType.None || fertilized) return;
+        if (isWater || Crop == CropType.None || fertilized) return;
         fertilized = true;
         StateChanged?.Invoke();
     }
 
     public void BuildFence()
     {
-        if (IsPlowed || IsFenced || !IsEmpty || Animal != AnimalKind.None) return;
+        if (isWater || IsPlowed || IsFenced || !IsEmpty || Animal != AnimalKind.None) return;
         IsFenced = true;
         if (fenceParts != null && fenceBasePositions != null) FormFencePerimeter();
         RefreshJoinedPlots();
@@ -508,7 +541,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
 
     public bool PlaceAnimal(AnimalKind kind)
     {
-        if (!IsFenced || !IsEmpty || Animal != AnimalKind.None || kind == AnimalKind.None)
+        if (isWater || !IsFenced || !IsEmpty || Animal != AnimalKind.None || kind == AnimalKind.None)
             return false;
         Animal = kind;
         var root = new GameObject(kind == AnimalKind.Cow ? "Vaca" : "Galinha");
@@ -579,6 +612,17 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         }
     }
 
+    // O modelo detalhado é somente visual; toda lógica continua no Solo original.
+    private void RefreshSurfaceVisual()
+    {
+        bool showPlowed = plowedVisual != null && IsPlowed &&
+            (joinedVisual == null || joinedVisual.UsesDetailedPlowed);
+        if (plowedVisual != null && plowedVisual.activeSelf != showPlowed)
+            plowedVisual.SetActive(showPlowed);
+        if (surfaceRenderer != null)
+            surfaceRenderer.enabled = joinedVisual == null && !showPlowed;
+    }
+
     private static void RefreshJoinedPlots()
     {
         var components = new Dictionary<string, List<Plot>>();
@@ -618,9 +662,6 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
             joinedVisuals[key].Dispose(true);
             joinedVisuals.Remove(key);
         }
-        foreach (Plot plot in allPlots)
-            if (plot != null && plot.surfaceRenderer != null && plot.joinedVisual == null)
-                plot.surfaceRenderer.enabled = true;
         foreach (KeyValuePair<string, List<Plot>> entry in components)
         {
             if (!joinedVisuals.TryGetValue(entry.Key, out JoinedVisual joined))
@@ -629,11 +670,10 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
                 joinedVisuals.Add(entry.Key, joined);
             }
             foreach (Plot member in entry.Value)
-            {
                 member.joinedVisual = joined;
-                member.surfaceRenderer.enabled = false;
-            }
         }
+        foreach (Plot plot in allPlots)
+            if (plot != null) plot.RefreshSurfaceVisual();
         foreach (Plot plot in allPlots)
             if (plot != null && plot.IsFenced && plot.joinedVisual == null &&
                 !plot.fenceInitialized && plot.fenceParts != null)
@@ -683,6 +723,7 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         private readonly List<Transform> fencePieces = new List<Transform>();
         private bool hovered;
         public bool IsAnimalGroup { get; }
+        public bool UsesDetailedPlowed { get; }
 
         public bool AllCanUse(ActivityKind activity, int currentDay, SeedCatalog catalog)
         {
@@ -695,6 +736,10 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
         {
             members = connected;
             IsAnimalGroup = connected[0].Animal != AnimalKind.None;
+            UsesDetailedPlowed = !IsAnimalGroup;
+            foreach (Plot plot in connected)
+                if (!plot.IsPlowed || plot.plowedVisual == null)
+                    UsesDetailedPlowed = false;
             var regions = BuildRegions(connected);
             float left = float.MaxValue, right = float.MinValue;
             float bottom = float.MaxValue, top = float.MinValue;
@@ -717,9 +762,28 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
             surfaceMesh = BuildSurface(regions, center, surfaceTop, surfaceBottom,
                 out List<BorderEdge> border);
             root.GetComponent<MeshFilter>().sharedMesh = surfaceMesh;
-            root.GetComponent<MeshRenderer>().sharedMaterial =
-                connected[0].surfaceRenderer.sharedMaterial;
+            MeshRenderer surface = root.GetComponent<MeshRenderer>();
+            surface.sharedMaterial = connected[0].surfaceRenderer.sharedMaterial;
             root.GetComponent<MeshCollider>().sharedMesh = surfaceMesh;
+            if (UsesDetailedPlowed)
+            {
+                // A união continua recebendo cliques pelo collider existente, mas os FBX
+                // individuais permanecem visíveis. Esta malha fica sob o relevo e
+                // preenche as pequenas frestas causadas pelas bordas irregulares.
+                surface.enabled = false;
+                var underlay = new GameObject("Terra de união - preenchimento",
+                    typeof(MeshFilter), typeof(MeshRenderer));
+                underlay.transform.SetParent(root.transform, false);
+                underlay.GetComponent<MeshFilter>().sharedMesh = surfaceMesh;
+                underlay.GetComponent<MeshRenderer>().sharedMaterial = surface.sharedMaterial;
+
+                float lowest = surfaceTop;
+                foreach (Plot plot in connected)
+                    foreach (Renderer part in plot.plowedVisual.GetComponentsInChildren<Renderer>(true))
+                        lowest = Mathf.Min(lowest, part.bounds.min.y);
+                float depth = Mathf.Clamp(surfaceTop - lowest + 0.015f, 0.035f, 0.15f);
+                underlay.transform.localPosition = Vector3.down * depth;
+            }
             root.GetComponent<PlotJoinedSurface>().Configure(connected, SetHovered);
 
             outlineMesh = BuildOutline(border, center, surfaceTop + 0.015f);
@@ -1050,7 +1114,21 @@ public sealed class Plot : MonoBehaviour, IPointerClickHandler, IPointerEnterHan
                         new Vector3(length + 0.015f, height, thickness) :
                         new Vector3(thickness, height, length + 0.015f);
                     UnityEngine.Object.Destroy(part.GetComponent<Collider>());
-                    part.GetComponent<Renderer>().sharedMaterial = original.sharedMaterial;
+                    Renderer fenceRenderer = part.GetComponent<Renderer>();
+                    fenceRenderer.sharedMaterial = original.sharedMaterial;
+                    if (source.joinedFenceModel != null)
+                    {
+                        // Mantém a peça lógica e a animação existentes; troca só a malha visível.
+                        GameObject visual = new GameObject("Visual - Cerca FBX");
+                        visual.transform.SetParent(part.transform, false);
+                        GameObject model = UnityEngine.Object.Instantiate(
+                            source.joinedFenceModel, visual.transform);
+                        if (GS2VisualFit.Fit(visual.transform, model.transform,
+                            new Bounds(Vector3.zero, Vector3.one),
+                            GS2VisualFit.Axis.LongX, false))
+                            fenceRenderer.enabled = false;
+                        else UnityEngine.Object.Destroy(visual);
+                    }
                     fencePieces.Add(part.transform);
                     part.transform.DOLocalMove(position, source.fencePieceDuration + 0.1f)
                         .SetDelay(startDelay + pieceIndex * source.fencePieceDelay * 0.45f)

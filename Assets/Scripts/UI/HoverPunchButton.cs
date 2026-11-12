@@ -69,9 +69,9 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         if (outline != null) outline.enabled = true;
         if (animating) return;
         rect.DOKill();
-        rect.DOScale(originalScale * hoverScale, duration).SetEase(Ease.OutBack);
+        rect.DOScale(originalScale * hoverScale, duration).SetEase(Ease.OutBack).SetUpdate(true);
         if (image != null)
-            image.DOColor(new Color(1f, 0.96f, 0.76f, originalColor.a), duration);
+            image.DOColor(new Color(1f, 0.96f, 0.76f, originalColor.a), duration).SetUpdate(true);
     }
 
     public void OnPointerExit(PointerEventData eventData)
@@ -80,8 +80,8 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         if (outline != null) outline.enabled = false;
         if (animating) return;
         rect.DOKill();
-        rect.DOScale(originalScale, duration).SetEase(Ease.OutCubic);
-        if (image != null) image.DOColor(originalColor, duration);
+        rect.DOScale(originalScale, duration).SetEase(Ease.OutCubic).SetUpdate(true);
+        if (image != null) image.DOColor(originalColor, duration).SetUpdate(true);
     }
 
     public void OnPointerClick(PointerEventData eventData)
@@ -92,7 +92,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         animating = true;
         animationStartedFrame = Time.frameCount;
         rect.DOKill();
-        DOTween.Sequence().SetTarget(rect)
+        DOTween.Sequence().SetTarget(rect).SetUpdate(true)
             .Append(rect.DOScale(originalScale * pressedScale, 0.08f))
             .Append(rect.DOScale(originalScale * (hovered ? hoverScale : 1f), duration)
                 .SetEase(Ease.OutBack))
@@ -122,7 +122,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
         rect.localScale = originalScale * (hovered ? hoverScale : 1f);
         rect.anchoredPosition = originalPosition;
         rect.localRotation = originalRotation;
-        rect.DOShakeRotation(0.32f, new Vector3(0f, 0f, 8f), 12, 90f)
+        rect.DOShakeRotation(0.32f, new Vector3(0f, 0f, 8f), 12, 90f).SetUpdate(true)
             .OnComplete(() =>
             {
                 rect.localRotation = originalRotation;

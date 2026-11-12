@@ -48,18 +48,32 @@ public sealed class ResourceHud : MonoBehaviour
     private readonly Tween[] counterTweens = new Tween[9];
     private readonly Tween[] counterPulses = new Tween[9];
     private readonly Color[] textColors = new Color[9];
+    private readonly Transform[] counterRoots = new Transform[9];
+    private readonly Vector3[] counterRootScales = new Vector3[9];
     private readonly Color[] iconColors = new Color[9];
     private readonly Material[] iconFlashMaterials = new Material[9];
     private readonly Material[] originalIconMaterials = new Material[9];
     private static readonly int FlashId = Shader.PropertyToID("_Flash");
     private static readonly int FlashColorId = Shader.PropertyToID("_FlashColor");
     private ResourceCounterHover counterHover;
+    private TopBarAutoHide topBar;
+
+    public bool HasFlyingResources
+    {
+        get
+        {
+            foreach (int amount in inFlight)
+                if (amount > 0) return true;
+            return false;
+        }
+    }
 
     private Camera UiCamera => canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
         ? canvas.worldCamera : null;
 
     private void Awake()
     {
+        topBar = GetComponent<TopBarAutoHide>();
         canvas = GetComponentInParent<Canvas>();
         if (canvas != null) canvas = canvas.rootCanvas;
         if (canvas != null) canvasRect = canvas.transform as RectTransform;
@@ -77,6 +91,12 @@ public sealed class ResourceHud : MonoBehaviour
             Text label = TargetFor(kind);
             Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
             if (label != null) textColors[i] = label.color;
+            if (label != null && icon != null &&
+                label.rectTransform.parent == icon.rectTransform.parent)
+            {
+                counterRoots[i] = label.rectTransform.parent;
+                counterRootScales[i] = counterRoots[i].localScale;
+            }
             if (icon != null)
             {
                 iconColors[i] = icon.color;
@@ -118,9 +138,8 @@ public sealed class ResourceHud : MonoBehaviour
                 Destroy(iconFlashMaterials[i]);
                 iconFlashMaterials[i] = null;
             }
-            if (label != null && icon != null &&
-                label.rectTransform.parent == icon.rectTransform.parent)
-                label.rectTransform.parent.localScale = Vector3.one;
+            if (counterRoots[i] != null)
+                counterRoots[i].localScale = counterRootScales[i];
         }
         System.Array.Clear(inFlight, 0, inFlight.Length);
     }
@@ -198,25 +217,24 @@ public sealed class ResourceHud : MonoBehaviour
         int pending = batch.Icons.Count;
         inFlight[(int)batch.Kind] += pending;
         Refresh();
-        Vector2 destination = CanvasPoint(RectTransformUtility.WorldToScreenPoint(UiCamera,
-            target.rectTransform.TransformPoint(target.rectTransform.rect.center)));
+        topBar?.RevealForResources();
         for (int i = 0; i < batch.Icons.Count; i++)
         {
             RectTransform rect = batch.Icons[i];
             if (rect == null)
             {
+                CreditArrival(batch.Kind, 1);
                 if (--pending == 0) onAllArrived?.Invoke();
                 continue;
             }
             rect.DOKill();
             Sequence flight = DOTween.Sequence().SetId(this);
             flight.AppendInterval(i * iconInterval);
-            flight.Append(rect.DOAnchorPos(destination, flightDuration).SetEase(Ease.InCubic));
+            flight.Append(FollowCounter(rect, target));
             flight.Join(rect.DOScale(0.4f, flightDuration).SetEase(Ease.InQuad));
             flight.OnComplete(() =>
             {
-                inFlight[(int)batch.Kind] = Mathf.Max(0, inFlight[(int)batch.Kind] - 1);
-                Refresh();
+                CreditArrival(batch.Kind, 1);
                 if (--pending == 0) onAllArrived?.Invoke();
             });
             flight.OnKill(() => { if (rect != null) Destroy(rect.gameObject); });
@@ -239,14 +257,12 @@ public sealed class ResourceHud : MonoBehaviour
         }
         inFlight[(int)kind] += amount;
         Refresh();
+        topBar?.RevealForResources();
         Vector2 origin = CanvasPoint(screenOrigin);
-        Vector3 targetCenter = target.rectTransform.rect.center;
-        Vector2 destination = CanvasPoint(RectTransformUtility.WorldToScreenPoint(UiCamera,
-            target.rectTransform.TransformPoint(targetCenter)));
         int count = Mathf.Min(amount, Mathf.Max(1, maximumFlyingIcons));
         int pending = count;
         for (int i = 0; i < count; i++)
-            CreateIcon(kind, i, count, origin, destination, target,
+            CreateIcon(kind, i, count, origin, target,
                 amount / count + (i < amount % count ? 1 : 0), pauseSeconds, () =>
                 {
                     if (--pending == 0) onAllArrived?.Invoke();
@@ -260,8 +276,22 @@ public sealed class ResourceHud : MonoBehaviour
         return point;
     }
 
+    private Tween FollowCounter(RectTransform icon, Text target)
+    {
+        Vector2 start = icon.anchoredPosition;
+        float progress = 0f;
+        return DOTween.To(() => progress, value =>
+        {
+            progress = value;
+            if (icon == null || target == null || canvasRect == null) return;
+            Vector2 screen = RectTransformUtility.WorldToScreenPoint(UiCamera,
+                target.rectTransform.TransformPoint(target.rectTransform.rect.center));
+            icon.anchoredPosition = Vector2.LerpUnclamped(start, CanvasPoint(screen), value);
+        }, 1f, flightDuration).SetEase(Ease.InCubic);
+    }
+
     private void CreateIcon(ResourceKind kind, int index, int count, Vector2 origin,
-        Vector2 destination, Text target, int credited, float pauseSeconds,
+        Text target, int credited, float pauseSeconds,
         System.Action onArrived)
     {
         var icon = new GameObject("Recurso em voo - " + kind, typeof(RectTransform),
@@ -289,12 +319,11 @@ public sealed class ResourceHud : MonoBehaviour
             flight.AppendInterval(index * iconInterval)
                 .Append(rect.DOScale(1f, 0.15f).SetEase(Ease.OutBack));
         if (pauseSeconds > 0f) flight.AppendInterval(pauseSeconds);
-        flight.Append(rect.DOAnchorPos(destination, flightDuration).SetEase(Ease.InCubic))
+        flight.Append(FollowCounter(rect, target))
             .Join(rect.DOScale(0.45f, flightDuration).SetEase(Ease.InQuad))
             .OnComplete(() =>
             {
-                inFlight[(int)kind] = Mathf.Max(0, inFlight[(int)kind] - credited);
-                Refresh();
+                CreditArrival(kind, credited);
                 onArrived?.Invoke();
             })
             .OnKill(() => { if (icon != null) Destroy(icon); });
@@ -362,6 +391,23 @@ public sealed class ResourceHud : MonoBehaviour
 
     private int Shown(ResourceKind kind) => Mathf.Max(0, Stored(kind) - inFlight[(int)kind]);
 
+    // The bank already owns the resource. Reveal each portion exactly when its icon lands.
+    private void CreditArrival(ResourceKind kind, int amount)
+    {
+        int index = (int)kind;
+        inFlight[index] = Mathf.Max(0, inFlight[index] - amount);
+        int next = Mathf.Min(Shown(kind), displayed[index] + amount);
+        if (next > displayed[index])
+        {
+            displayed[index] = next;
+            DrawCounter(kind);
+            // Frequent arrivals update the number individually without restarting every pulse.
+            if (counterPulses[index] == null || !counterPulses[index].IsActive())
+                FlashCounter(kind, 1);
+        }
+        Refresh();
+    }
+
     private void StepCounter(ResourceKind kind)
     {
         int index = (int)kind;
@@ -371,7 +417,7 @@ public sealed class ResourceHud : MonoBehaviour
         displayed[index] += direction;
         DrawCounter(kind);
         FlashCounter(kind, direction);
-        counterTweens[index] = DOVirtual.DelayedCall(0.075f, () => StepCounter(kind))
+        counterTweens[index] = DOVirtual.DelayedCall(0.075f, () => StepCounter(kind), false)
             .SetTarget(this);
     }
 
@@ -384,16 +430,12 @@ public sealed class ResourceHud : MonoBehaviour
         counterPulses[index]?.Kill();
         Sequence pulse = DOTween.Sequence().SetTarget(this);
         counterPulses[index] = pulse;
-        if (label != null && icon != null)
+        if (counterRoots[index] != null)
         {
-            RectTransform numberRect = label.rectTransform;
-            RectTransform iconRect = icon.rectTransform;
-            if (numberRect.parent == iconRect.parent)
-            {
-                numberRect.parent.localScale = Vector3.one;
-                pulse.Insert(0f, numberRect.parent.DOScale(1.08f, 0.09f)
-                    .SetLoops(2, LoopType.Yoyo).SetEase(Ease.OutQuad));
-            }
+            counterRoots[index].localScale = counterRootScales[index];
+            pulse.Insert(0f, counterRoots[index]
+                .DOScale(counterRootScales[index] * 1.08f, 0.09f)
+                .SetLoops(2, LoopType.Yoyo).SetEase(Ease.OutQuad));
         }
         if (label != null)
         {
@@ -438,13 +480,21 @@ public sealed class ResourceHud : MonoBehaviour
     private void Refresh()
     {
         if (resources == null) return;
+        bool changed = false;
+        for (int i = 0; i < displayed.Length; i++)
+            if (displayed[i] != Shown((ResourceKind)i)) { changed = true; break; }
+
+        // The bank updates immediately; only its visual counting waits for the HUD.
+        float revealDelay = changed && topBar != null ? topBar.PrepareResourceFeedback() : 0f;
+        float countDelay = Mathf.Max(0.075f, revealDelay + 0.05f);
         for (int i = 0; i < displayed.Length; i++)
         {
             ResourceKind kind = (ResourceKind)i;
             DrawCounter(kind);
-            if (displayed[i] != Shown(kind) &&
-                (counterTweens[i] == null || !counterTweens[i].IsActive()))
-                counterTweens[i] = DOVirtual.DelayedCall(0.075f, () => StepCounter(kind))
+            if (displayed[i] == Shown(kind)) continue;
+            if (revealDelay > 0f) counterTweens[i]?.Kill();
+            if (counterTweens[i] == null || !counterTweens[i].IsActive())
+                counterTweens[i] = DOVirtual.DelayedCall(countDelay, () => StepCounter(kind), false)
                     .SetTarget(this);
         }
     }

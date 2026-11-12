@@ -108,7 +108,7 @@ public sealed class CommunityCamera : MonoBehaviour
 
     private void Update()
     {
-        if (heldView) return;
+        if (heldView || Time.timeScale == 0f) return;
         Keyboard keyboard = Keyboard.current;
         Vector2 movement = Vector2.zero;
         float zoom = 0f;

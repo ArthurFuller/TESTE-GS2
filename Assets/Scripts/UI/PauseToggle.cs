@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 public sealed class PauseToggle : MonoBehaviour
@@ -10,9 +11,11 @@ public sealed class PauseToggle : MonoBehaviour
 
     private bool paused;
     private Canvas buttonCanvas;
+    private TopBarAutoHide topBar;
 
     private void Awake()
     {
+        topBar = GetComponentInParent<TopBarAutoHide>();
         if (button != null) buttonCanvas = button.GetComponent<Canvas>();
         if (button != null) button.onClick.AddListener(Toggle);
         UpdateDisplay();
@@ -21,7 +24,11 @@ public sealed class PauseToggle : MonoBehaviour
     private void OnDestroy()
     {
         if (button != null) button.onClick.RemoveListener(Toggle);
-        if (paused) Time.timeScale = 1f;
+        if (paused)
+        {
+            topBar?.SetPaused(false);
+            Time.timeScale = 1f;
+        }
     }
 
     public void Toggle()
@@ -29,6 +36,9 @@ public sealed class PauseToggle : MonoBehaviour
         paused = !paused;
         AudioManager.Play(paused ? SoundCue.PanelOpen : SoundCue.PanelClose);
         Time.timeScale = paused ? 0f : 1f;
+        topBar?.SetPaused(paused);
+        if (paused && EventSystem.current != null)
+            EventSystem.current.SetSelectedGameObject(null);
         UpdateDisplay();
     }
 

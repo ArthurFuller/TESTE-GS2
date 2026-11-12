@@ -177,7 +177,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
 
     private void Update()
     {
-        if (!Application.isPlaying || dragging != null) return;
+        if (!Application.isPlaying || dragging != null || Time.timeScale == 0f) return;
         Vector2 size = ((RectTransform)transform.parent).rect.size;
         if (size != lastContainerSize)
         {
@@ -254,14 +254,18 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         {
             deckOrder.Remove(card);
             testCards.Remove(card);
-            card.FadeOut(() => { if (card != null) Destroy(card.gameObject); });
+            card.FadeOut(() =>
+            {
+                if (card != null) Destroy(card.gameObject);
+                Layout(true, true);
+            });
         }
         else
         {
             spent.Add(card);
             card.FadeOut(() => { if (card != null) card.gameObject.SetActive(false); });
+            Layout(true, true);
         }
-        Layout(true, true);
     }
 
     private void OnDayChanged()

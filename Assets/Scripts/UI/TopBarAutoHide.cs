@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.UI;
 
 public sealed class TopBarAutoHide : MonoBehaviour
 {
@@ -23,8 +22,8 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
     private RectTransform[] widgets;
     private Vector2[] widgetPositions;
-    private Button[] buttons;
     private Camera uiCamera;
+    private ResourceHud resourceHud;
     private Sequence motion;
     private bool open;
     private bool dayActive;
@@ -32,12 +31,13 @@ public sealed class TopBarAutoHide : MonoBehaviour
     private bool waitForPointerExit;
     private bool timelineDayOpen;
     private bool closingAfterTimeline;
+    private bool paused;
     private float lastHoverTime;
 
     private void Awake()
     {
         if (bar == null) bar = (RectTransform)transform;
-        buttons = bar.GetComponentsInChildren<Button>(true);
+        resourceHud = GetComponent<ResourceHud>();
         var ordered = new List<RectTransform>(bar.childCount);
         for (int i = 0; i < bar.childCount; i++)
         {
@@ -80,22 +80,38 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
     private void Update()
     {
-        if (!dayActive || closingAfterTimeline) return;
+        if (paused || !dayActive) return;
+
+        // Dragging takes precedence over hover, open panels and resource flights.
+        if (hand != null && hand.IsDraggingCard)
+        {
+            lastHoverTime = Time.unscaledTime;
+            if (open) SetOpen(false, false);
+            return;
+        }
+        if (closingAfterTimeline) return;
+
+        // Target selection has priority over the HUD, including incoming resources.
+        if (hand != null && hand.IsSelectionLocked)
+        {
+            if (open)
+            {
+                missionsPanel?.Close();
+                CloseAfterTimeline();
+            }
+            return;
+        }
+
+        // Keep the destination visible for the entire flight, including while paused.
+        if (resourceHud != null && resourceHud.HasFlyingResources)
+        {
+            RevealForResources();
+            return;
+        }
+
         if (Mouse.current == null) return;
         Vector2 pointer = Mouse.current.position.ReadValue();
         bool overBar = RectTransformUtility.RectangleContainsScreenPoint(bar, pointer, uiCamera);
-        bool overTimeline = timeline != null && timeline.IsOpen &&
-            timeline.PanelClip != null &&
-            RectTransformUtility.RectangleContainsScreenPoint(
-                timeline.PanelClip, pointer, uiCamera);
-        if (open && overBar && Mouse.current.leftButton.wasPressedThisFrame &&
-            !overTimeline && !OverButton(pointer))
-        {
-            missionsPanel?.Close();
-            waitForPointerExit = true;
-            CloseAfterTimeline();
-            return;
-        }
         if (waitForPointerExit)
         {
             if (overBar) return;
@@ -108,11 +124,6 @@ public sealed class TopBarAutoHide : MonoBehaviour
             if (!open) SetOpen(true, false);
             return;
         }
-        if (hand != null && hand.IsDraggingCard)
-        {
-            lastHoverTime = Time.unscaledTime;
-            return;
-        }
         if (overBar)
         {
             lastHoverTime = Time.unscaledTime;
@@ -122,6 +133,47 @@ public sealed class TopBarAutoHide : MonoBehaviour
             SetOpen(false, false);
     }
 
+    public void RevealForResources() => PrepareResourceFeedback();
+
+    // The day counter is the only manual close target for the top bar.
+    public void CloseFromDayCounter()
+    {
+        if (paused || !dayActive || !open || closingAfterTimeline ||
+            (resourceHud != null && resourceHud.HasFlyingResources) ||
+            (hand != null && (hand.IsDraggingCard || hand.IsSelectionLocked))) return;
+
+        missionsPanel?.Close();
+        waitForPointerExit = true;
+        CloseAfterTimeline();
+    }
+
+    // Returns the time remaining before the counter area is fully visible.
+    public float PrepareResourceFeedback()
+    {
+        if (paused || !dayActive || closingAfterTimeline || timelineDayOpen ||
+            (timeline != null && timeline.IsOpen) ||
+            (hand != null && (hand.IsSelectionLocked || hand.IsDraggingCard))) return 0f;
+
+        lastHoverTime = Time.unscaledTime;
+        if (!open) SetOpen(true, false);
+        if (bar == null || (bar.anchoredPosition - openPosition).sqrMagnitude < 0.01f)
+            return 0f;
+        return motion != null && motion.IsActive()
+            ? Mathf.Max(0f, slideDuration - motion.Elapsed()) : 0f;
+    }
+
+    public void SetPaused(bool value)
+    {
+        if (paused == value) return;
+        paused = value;
+        if (paused) motion?.Pause();
+        else
+        {
+            motion?.Play();
+            lastHoverTime = Time.unscaledTime;
+        }
+    }
+
     private void OpenForNewDay()
     {
         wavePendingForDay = true;
@@ -129,16 +181,6 @@ public sealed class TopBarAutoHide : MonoBehaviour
         waitForPointerExit = false;
         lastHoverTime = Time.unscaledTime;
         SetOpen(true, false);
-    }
-
-    private bool OverButton(Vector2 pointer)
-    {
-        foreach (Button button in buttons)
-            if (button != null && button.isActiveAndEnabled && button.interactable &&
-                RectTransformUtility.RectangleContainsScreenPoint(
-                    (RectTransform)button.transform, pointer, uiCamera))
-                return true;
-        return false;
     }
 
     private void CloseForDayEnd()
@@ -187,6 +229,7 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
     private void SetOpen(bool show, bool immediate)
     {
+        if (paused) return;
         bool playWave = show && wavePendingForDay && !immediate;
         if (open == show && !immediate && !playWave) return;
         open = show;

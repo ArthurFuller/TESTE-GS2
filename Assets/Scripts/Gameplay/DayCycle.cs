@@ -65,7 +65,8 @@ public sealed class DayCycle : MonoBehaviour
         foreach (Plot plot in plots)
         {
             if (plot == null) continue;
-            if (plot.Animal == AnimalKind.Cow) todayMilk += milkPerCow;
+            if (plot.Animal == AnimalKind.Cow) todayMilk += milkPerCow +
+                (MandalaSynergy.Instance != null ? MandalaSynergy.Instance.ExtraMilk(plot) : 0);
             if (plot.Animal == AnimalKind.Chicken) todayEggs += eggsPerChicken;
         }
     }
@@ -87,7 +88,9 @@ public sealed class DayCycle : MonoBehaviour
             plot.PulseAnimal();
             if (resourceHud == null) continue;
             ResourceKind kind = plot.Animal == AnimalKind.Cow ? ResourceKind.Milk : ResourceKind.Eggs;
-            int amount = plot.Animal == AnimalKind.Cow ? milkPerCow : eggsPerChicken;
+            int amount = plot.Animal == AnimalKind.Cow ? milkPerCow +
+                (MandalaSynergy.Instance != null ? MandalaSynergy.Instance.ExtraMilk(plot) : 0)
+                : eggsPerChicken;
             resourceHud.FlyFromWorld(kind, amount, plot.transform.position + Vector3.up, 0.8f);
         }
     }
@@ -284,6 +287,9 @@ public sealed class DayCycle : MonoBehaviour
         summaryOpen = false;
         currentDay++;
         ProduceAnimalResources();
+        // O crescimento da mandala precede novos eventos para não anular uma praga recém-aplicada.
+        if (MandalaSynergy.Instance != null)
+            MandalaSynergy.Instance.ApplyDailyGrowthBonuses(currentDay, seedCatalog);
         if (dayEvents != null) dayEvents.StartDay(currentDay);
         actions.BeginNextDay();
         if (houseSites != null)
@@ -297,7 +303,7 @@ public sealed class DayCycle : MonoBehaviour
                 actions.RegisterWorker(resident);
                 if (dayEvents != null) dayEvents.RegisterWorker(resident);
                 resident.BeginNextDay();
-                actions.BringWorkerOutOfHouse(resident, site.DoorwayPosition);
+                resident.SetStatus("em casa");
             }
         }
         foreach (Plot plot in plots)
