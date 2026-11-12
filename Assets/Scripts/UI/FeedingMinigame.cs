@@ -60,6 +60,14 @@ public sealed class FeedingMinigame : MonoBehaviour
         LayoutWorkerTargets();
         reservedIcon = null;
         chosenFood = new SaleItem?[workers.Length];
+        for (int i = 0; i < workerTargets.Length; i++)
+        {
+            if (workerTargets[i] == null) continue;
+            Animator character = workerTargets[i].GetComponent<Animator>();
+            if (character != null) character.Play("Idle", 0, 0f);
+            FeedingReaction reaction = workerTargets[i].GetComponentInChildren<FeedingReaction>(true);
+            if (reaction != null) reaction.ResetVisual();
+        }
         completed = onCompleted;
         cancelled = onCancelled;
         open = true;
@@ -121,7 +129,7 @@ public sealed class FeedingMinigame : MonoBehaviour
             RectTransform target = workerTargets[i];
             if (target == null) continue;
             target.anchoredPosition = new Vector2((i - (count - 1) * 0.5f) * spacing, -80f);
-            target.sizeDelta = new Vector2(width, 72f);
+            target.sizeDelta = new Vector2(width, 96f);
             if (workerLabels[i] == null) continue;
             workerLabels[i].rectTransform.sizeDelta = new Vector2(width - 16f, 60f);
             workerLabels[i].fontSize = count >= 4 ? 12 : 14;
@@ -160,6 +168,11 @@ public sealed class FeedingMinigame : MonoBehaviour
         if (target < 0 || !Consume(icon.Kind)) return null;
         reservedIcon = null;
         chosenFood[target] = icon.Kind;
+        Animator character = workerTargets[target].GetComponent<Animator>();
+        if (character != null)
+            character.Play(icon.Kind == SaleItem.Food ? "Boa" : "Ok", 0, 0f);
+        FeedingReaction reaction = workerTargets[target].GetComponentInChildren<FeedingReaction>(true);
+        if (reaction != null) reaction.Show(icon.Kind == SaleItem.Food);
         AudioManager.Play(SoundCue.FeedingAssigned);
         RectTransform worker = workerTargets[target];
         worker.DOKill();

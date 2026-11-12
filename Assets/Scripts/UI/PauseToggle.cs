@@ -6,6 +6,7 @@ public sealed class PauseToggle : MonoBehaviour
 {
     [SerializeField] private Button button;
     [SerializeField] private Text label;
+    [SerializeField] private Image resumeArtwork;
     [SerializeField] private CanvasGroup pauseOverlay;
     [SerializeField] private Button missionsButton;
 
@@ -50,7 +51,8 @@ public sealed class PauseToggle : MonoBehaviour
             buttonCanvas.overrideSorting = paused;
             buttonCanvas.sortingOrder = paused ? 5 : 0;
         }
-        if (label != null) label.text = paused ? ">" : "II";
+        if (label != null) label.text = paused ? "" : "II";
+        if (resumeArtwork != null) resumeArtwork.enabled = paused;
         if (missionsButton != null) missionsButton.interactable = !paused;
         if (pauseOverlay == null) return;
         pauseOverlay.alpha = paused ? 1f : 0f;

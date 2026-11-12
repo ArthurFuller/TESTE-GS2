@@ -8,10 +8,17 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField] private CanvasGroup group;
     [SerializeField] private RectTransform marker;
     [SerializeField] private RectTransform greenTarget;
+    [Header("Arte dos minigames (objetos na cena)")]
+    [SerializeField] private RectTransform woodArtRoot;
+    [SerializeField] private RectTransform fishingArtRoot;
+    [SerializeField] private Image fishingFill;
     [SerializeField] private Text title;
-    [SerializeField] private Button actionButton;
-    [SerializeField] private RectTransform topHud;
-    [SerializeField] private RectTransform finishDayButton;
+    [SerializeField] private Button woodActionButton;
+    [SerializeField] private Button fishingActionButton;
+    [SerializeField, HideInInspector] private bool useWoodBarPosition;
+    [SerializeField, HideInInspector] private Vector2 woodBarPosition;
+    [SerializeField, HideInInspector] private bool useFishingBarPosition;
+    [SerializeField, HideInInspector] private Vector2 fishingBarPosition;
     [Header("Coleta de madeira")]
     [SerializeField, Min(0.1f)] private float markerCrossingDuration = 2f;
     [SerializeField, Range(0.3f, 1f)] private float speedMultiplierPerHit = 0.7f;
@@ -26,8 +33,6 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Range(0.01f, 0.5f)] private float fishingClickGain = 0.085f;
     [SerializeField, Min(0.01f)] private float fishingDrainPerSecond = 0.16f;
     [SerializeField, Min(1f)] private float fishingPlusDifficulty = 1.35f;
-    [SerializeField, Min(140f)] private float fishingPanelWidth = 190f;
-    [SerializeField, Min(0f)] private float fishingVerticalGap = 45f;
     [SerializeField, Min(0f)] private float hitPunchStrength = 0.08f;
     [SerializeField, Min(0f)] private float missShakeStrength = 14f;
     [SerializeField, Min(0.05f)] private float fishDropPunchDuration = 0.23f;
@@ -37,6 +42,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     private struct Layout
     {
         public Vector2 Position, Size, Min, Max, Pivot;
+        public Vector3 Scale;
         public Layout(RectTransform rect)
         {
             Position = rect.anchoredPosition;
@@ -44,6 +50,7 @@ public sealed class GatheringMinigame : MonoBehaviour
             Min = rect.anchorMin;
             Max = rect.anchorMax;
             Pivot = rect.pivot;
+            Scale = rect.localScale;
         }
         public void Apply(RectTransform rect)
         {
@@ -52,7 +59,7 @@ public sealed class GatheringMinigame : MonoBehaviour
             rect.pivot = Pivot;
             rect.sizeDelta = Size;
             rect.anchoredPosition = Position;
-            rect.localScale = Vector3.one;
+            rect.localScale = Scale;
         }
     }
 
@@ -61,18 +68,19 @@ public sealed class GatheringMinigame : MonoBehaviour
     private Action<bool> fishingTensionChanged;
     private Action fishDropped;
     private RectTransform bar, panel, buttonRect, titleRect;
-    private Text buttonText;
-    private Layout panelLayout, barLayout, markerLayout, targetLayout, buttonLayout, titleLayout;
+    private Image barImage;
+    private Layout panelLayout, barLayout, markerLayout, targetLayout, titleLayout;
     private bool layoutCaptured, fishing, fishingPlus, resolving;
     private bool fishingTensionStarted;
     private int round, hits;
     private float difficultyMultiplier, initialTargetWidth, previousTargetCenter;
     private float markerX, markerLimit, markerPivotOffset, markerDirection;
     private float fishingProgress, fishingElapsed;
-    private Vector2 lastParentSize;
-    private readonly Vector3[] layoutCorners = new Vector3[4];
+    private readonly Vector3[] targetCorners = new Vector3[4];
 
     public bool CanStart() => ResolveReferences();
+    public bool IsRunning => completed != null && !resolving;
+    public bool IsFishingMode => fishing;
 
     private void Awake()
     {
@@ -98,6 +106,10 @@ public sealed class GatheringMinigame : MonoBehaviour
         fishDropped = onFishDropped;
         fishing = activity == ActivityKind.Fish || activity == ActivityKind.FishPlus;
         fishingPlus = activity == ActivityKind.FishPlus;
+        if (fishing && useFishingBarPosition) bar.anchoredPosition = fishingBarPosition;
+        else if (!fishing && useWoodBarPosition) bar.anchoredPosition = woodBarPosition;
+        buttonRect = (fishing ? fishingActionButton : woodActionButton).GetComponent<RectTransform>();
+        RefreshArt();
         resolving = false;
         fishingTensionStarted = false;
         round = hits = 0;
@@ -114,21 +126,18 @@ public sealed class GatheringMinigame : MonoBehaviour
     {
         if (group == null || marker == null || marker.parent is not RectTransform parent) return false;
         bar = parent;
+        barImage = bar.GetComponent<Image>();
         if (greenTarget == null) greenTarget = bar.Find("Zona perfeita") as RectTransform;
         if (greenTarget == null) return false;
-        if (actionButton == null) actionButton = group.GetComponentInChildren<Button>(true);
-        if (actionButton == null) return false;
+        if (woodActionButton == null || fishingActionButton == null) return false;
         if (layoutCaptured) return true;
         panel = group.GetComponent<RectTransform>();
-        buttonRect = actionButton.GetComponent<RectTransform>();
         if (title != null) titleRect = title.GetComponent<RectTransform>();
-        buttonText = actionButton.GetComponentInChildren<Text>(true);
-        if (panel == null || buttonRect == null) return false;
+        if (panel == null) return false;
         panelLayout = new Layout(panel);
         barLayout = new Layout(bar);
         markerLayout = new Layout(marker);
         targetLayout = new Layout(greenTarget);
-        buttonLayout = new Layout(buttonRect);
         if (titleRect != null) titleLayout = new Layout(titleRect);
         initialTargetWidth = greenTarget.rect.width;
         layoutCaptured = initialTargetWidth > 0f;
@@ -142,14 +151,26 @@ public sealed class GatheringMinigame : MonoBehaviour
         bar.DOKill();
         marker.DOKill();
         greenTarget.DOKill();
-        buttonRect.DOKill();
         panelLayout.Apply(panel);
         barLayout.Apply(bar);
         markerLayout.Apply(marker);
         targetLayout.Apply(greenTarget);
-        buttonLayout.Apply(buttonRect);
         if (titleRect != null) titleLayout.Apply(titleRect);
-        if (buttonText != null) buttonText.text = "PARAR";
+    }
+
+    private void RefreshArt()
+    {
+        if (title != null) title.gameObject.SetActive(false);
+        if (woodArtRoot != null) woodArtRoot.gameObject.SetActive(!fishing);
+        if (fishingArtRoot != null) fishingArtRoot.gameObject.SetActive(fishing);
+        if (woodActionButton != fishingActionButton)
+        {
+            woodActionButton.gameObject.SetActive(!fishing);
+            fishingActionButton.gameObject.SetActive(fishing);
+        }
+        if (barImage != null) barImage.enabled = false;
+        marker.gameObject.SetActive(!fishing);
+        greenTarget.gameObject.SetActive(!fishing);
     }
 
     private void Update()
@@ -157,8 +178,6 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (completed == null || resolving) return;
         if (fishing)
         {
-            RectTransform parent = panel.parent as RectTransform;
-            if (parent != null && parent.rect.size != lastParentSize) LayoutFishingPanel();
             fishingElapsed += Time.deltaTime;
             float struggle = 1f + 0.25f * Mathf.Sin(fishingElapsed * 8f);
             float multiplier = difficultyMultiplier * (fishingPlus ? fishingPlusDifficulty : 1f);
@@ -198,25 +217,27 @@ public sealed class GatheringMinigame : MonoBehaviour
             if (fishingProgress >= 1f) FinishWithFeedback(1);
             return;
         }
-        Bounds markerBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, marker);
-        Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, greenTarget);
-        bool hit = markerBounds.center.x >= targetBounds.min.x &&
-            markerBounds.center.x <= targetBounds.max.x;
+        // Usa apenas o retângulo da zona. O sprite verde completo é recortado
+        // como filho e não pode ampliar a área válida do acerto.
+        greenTarget.GetWorldCorners(targetCorners);
+        float left = bar.InverseTransformPoint(targetCorners[0]).x;
+        float right = bar.InverseTransformPoint(targetCorners[2]).x;
+        float markerCenter = bar.InverseTransformPoint(
+            marker.TransformPoint(marker.rect.center)).x;
+        bool hit = markerCenter >= Mathf.Min(left, right) &&
+            markerCenter <= Mathf.Max(left, right);
         if (hit)
         {
             hits++;
             AudioManager.Play(SoundCue.WoodHit);
             woodHit?.Invoke();
             bar.DOKill();
-            bar.anchoredPosition = barLayout.Position;
-            bar.localScale = Vector3.one;
             bar.DOPunchScale(Vector3.one * hitPunchStrength, 0.2f, 4);
         }
         else
         {
             AudioManager.Play(SoundCue.WoodMiss);
             bar.DOKill();
-            bar.anchoredPosition = barLayout.Position;
             bar.DOShakeAnchorPos(0.22f, missShakeStrength, 12, 90f, false, true);
         }
         round++;
@@ -264,7 +285,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     private void StartWoodRound()
     {
         float markerWidth = marker.rect.width;
-        float targetWidth = Mathf.Max(markerWidth * 3f, initialTargetWidth - round * targetWidthReduction);
+        float targetWidth = Mathf.Max(markerWidth * 1.75f, initialTargetWidth - round * targetWidthReduction);
         greenTarget.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, targetWidth);
         float targetLimit = Mathf.Max(0f, bar.rect.width * 0.5f - targetWidth * 0.5f - edgePadding);
         float targetCenter = UnityEngine.Random.Range(-targetLimit, targetLimit);
@@ -282,73 +303,18 @@ public sealed class GatheringMinigame : MonoBehaviour
         markerX = -markerLimit;
         markerDirection = 1f;
         marker.anchoredPosition = new Vector2(markerX + markerPivotOffset, marker.anchoredPosition.y);
-        if (title != null)
-            title.text = "MADEIRA: ACERTE O VERDE\n" + (round + 1) + "/" + rounds + " · ACERTOS: " + hits;
     }
 
     private void StartFishing()
     {
-        LayoutFishingPanel();
-        greenTarget.anchorMin = new Vector2(0f, 0f);
-        greenTarget.anchorMax = new Vector2(1f, 0f);
-        greenTarget.pivot = new Vector2(0f, 0f);
-        greenTarget.anchoredPosition = Vector2.zero;
-        marker.anchorMin = new Vector2(0f, 1f);
-        marker.anchorMax = new Vector2(1f, 1f);
-        marker.pivot = new Vector2(0f, 1f);
-        marker.anchoredPosition = Vector2.zero;
-        if (buttonText != null) buttonText.text = "PUXAR";
         fishingProgress = initialFishingProgress;
         fishingElapsed = 0f;
-        UpdateFishingFill();
-        if (title != null)
-            title.text = fishingPlus ? "PESCA PLUS\n2 OU 4 PEIXES" : "PESCA\n1 OU 2 PEIXES";
-    }
-
-    private void LayoutFishingPanel()
-    {
-        RectTransform parent = panel.parent as RectTransform;
-        if (parent == null) return;
-        lastParentSize = parent.rect.size;
-        float top = parent.rect.yMax - 120f;
-        float bottom = parent.rect.yMin + 120f;
-        float right = parent.rect.xMax - 29f;
-        if (topHud != null)
-        {
-            topHud.GetWorldCorners(layoutCorners);
-            top = parent.InverseTransformPoint(layoutCorners[0]).y - fishingVerticalGap;
-        }
-        if (finishDayButton != null)
-        {
-            finishDayButton.GetWorldCorners(layoutCorners);
-            bottom = parent.InverseTransformPoint(layoutCorners[1]).y + fishingVerticalGap;
-            right = parent.InverseTransformPoint(layoutCorners[2]).x;
-        }
-        float height = Mathf.Max(220f, top - bottom);
-        panel.anchorMin = panel.anchorMax = new Vector2(1f, 1f);
-        panel.pivot = new Vector2(0.5f, 0.5f);
-        panel.sizeDelta = new Vector2(fishingPanelWidth, height);
-        panel.anchoredPosition = new Vector2(right - parent.rect.xMax - fishingPanelWidth * 0.5f,
-            top - parent.rect.yMax - height * 0.5f);
-        if (titleRect != null)
-        {
-            titleRect.sizeDelta = new Vector2(fishingPanelWidth - 20f, titleRect.sizeDelta.y);
-            titleRect.anchoredPosition = new Vector2(10f, -12f);
-        }
-        bar.anchorMin = bar.anchorMax = new Vector2(0f, 1f);
-        bar.pivot = new Vector2(0f, 1f);
-        bar.sizeDelta = new Vector2(42f, height - 140f);
-        bar.anchoredPosition = new Vector2((fishingPanelWidth - 42f) * 0.5f, -64f);
-        buttonRect.anchoredPosition = new Vector2((fishingPanelWidth - buttonRect.rect.width) * 0.5f,
-            -height + 55f);
         UpdateFishingFill();
     }
 
     private void UpdateFishingFill()
     {
-        float height = bar.rect.height;
-        greenTarget.sizeDelta = new Vector2(0f, height * fishingProgress);
-        marker.sizeDelta = new Vector2(0f, height * (1f - fishingProgress));
+        if (fishingFill != null) fishingFill.fillAmount = fishingProgress;
     }
 
     private void Complete(int rating)
