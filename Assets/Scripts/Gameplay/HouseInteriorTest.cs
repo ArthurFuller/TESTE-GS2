@@ -1,8 +1,7 @@
 using DG.Tweening;
 using UnityEngine;
-using UnityEngine.UI;
 
-// Protótipo isolado: botão temporário e uma visita à Casa 1, sem consumir ações.
+// Fluxo de entrada e saída preservado para integração futura à jogabilidade.
 public sealed class HouseInteriorTest : MonoBehaviour
 {
     [SerializeField] private WorkerAssignment worker;
@@ -13,8 +12,6 @@ public sealed class HouseInteriorTest : MonoBehaviour
     [Tooltip("Ponto para onde o personagem volta ao sair. Pode ser movido durante o Play Mode.")]
     [SerializeField] private Transform returnSpot;
     [SerializeField] private Transform activitySpot;
-    [SerializeField] private Button testButton;
-    [SerializeField] private Text testButtonLabel;
     [SerializeField, Range(0.25f, 1f)] private float indoorSpriteScale = 0.4f;
     [SerializeField, Min(0.1f)] private float walkingSpeed = 3f;
 
@@ -24,29 +21,7 @@ public sealed class HouseInteriorTest : MonoBehaviour
     private bool moving;
     private bool reserved;
 
-    private void Awake()
-    {
-        if (testButton != null) testButton.onClick.AddListener(ToggleHouse);
-    }
-
-    private void Update()
-    {
-        if (testButton == null) return;
-        bool visible = Time.timeScale > 0f && worker != null &&
-            worker.SpriteVisual != null && outside != null && doorway != null && returnSpot != null &&
-            activitySpot != null;
-        if (testButton.gameObject.activeSelf != visible)
-            testButton.gameObject.SetActive(visible);
-        if (!visible) return;
-        bool canEnter = !inside && !moving && actions != null && !actions.IsBusy &&
-            dayCycle != null && dayCycle.CanAcceptActions && !worker.UsedToday;
-        bool canExit = inside && !moving;
-        testButton.interactable = canEnter || canExit;
-        if (testButtonLabel != null)
-            testButtonLabel.text = inside ? "SAIR DA CASA (TESTE)" : "ENTRAR NA CASA (TESTE)";
-    }
-
-    private void ToggleHouse()
+    public void ToggleHouse()
     {
         if (moving || worker == null || worker.SpriteVisual == null ||
             outside == null || doorway == null || returnSpot == null || activitySpot == null) return;
@@ -126,8 +101,4 @@ public sealed class HouseInteriorTest : MonoBehaviour
         if (actions != null) actions.SetHousePreviewBusy(false);
     }
 
-    private void OnDestroy()
-    {
-        if (testButton != null) testButton.onClick.RemoveListener(ToggleHouse);
-    }
 }

@@ -15,10 +15,6 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField] private Text title;
     [SerializeField] private Button woodActionButton;
     [SerializeField] private Button fishingActionButton;
-    [SerializeField, HideInInspector] private bool useWoodBarPosition;
-    [SerializeField, HideInInspector] private Vector2 woodBarPosition;
-    [SerializeField, HideInInspector] private bool useFishingBarPosition;
-    [SerializeField, HideInInspector] private Vector2 fishingBarPosition;
     [Header("Coleta de madeira")]
     [SerializeField, Min(0.1f)] private float markerCrossingDuration = 2f;
     [SerializeField, Range(0.3f, 1f)] private float speedMultiplierPerHit = 0.7f;
@@ -76,11 +72,8 @@ public sealed class GatheringMinigame : MonoBehaviour
     private float difficultyMultiplier, initialTargetWidth, previousTargetCenter;
     private float markerX, markerLimit, markerPivotOffset, markerDirection;
     private float fishingProgress, fishingElapsed;
-    private readonly Vector3[] targetCorners = new Vector3[4];
 
     public bool CanStart() => ResolveReferences();
-    public bool IsRunning => completed != null && !resolving;
-    public bool IsFishingMode => fishing;
 
     private void Awake()
     {
@@ -106,8 +99,6 @@ public sealed class GatheringMinigame : MonoBehaviour
         fishDropped = onFishDropped;
         fishing = activity == ActivityKind.Fish || activity == ActivityKind.FishPlus;
         fishingPlus = activity == ActivityKind.FishPlus;
-        if (fishing && useFishingBarPosition) bar.anchoredPosition = fishingBarPosition;
-        else if (!fishing && useWoodBarPosition) bar.anchoredPosition = woodBarPosition;
         buttonRect = (fishing ? fishingActionButton : woodActionButton).GetComponent<RectTransform>();
         RefreshArt();
         resolving = false;
@@ -160,7 +151,7 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void RefreshArt()
     {
-        if (title != null) title.gameObject.SetActive(false);
+        if (title != null) title.gameObject.SetActive(true);
         if (woodArtRoot != null) woodArtRoot.gameObject.SetActive(!fishing);
         if (fishingArtRoot != null) fishingArtRoot.gameObject.SetActive(fishing);
         if (woodActionButton != fishingActionButton)
@@ -217,27 +208,25 @@ public sealed class GatheringMinigame : MonoBehaviour
             if (fishingProgress >= 1f) FinishWithFeedback(1);
             return;
         }
-        // Usa apenas o retângulo da zona. O sprite verde completo é recortado
-        // como filho e não pode ampliar a área válida do acerto.
-        greenTarget.GetWorldCorners(targetCorners);
-        float left = bar.InverseTransformPoint(targetCorners[0]).x;
-        float right = bar.InverseTransformPoint(targetCorners[2]).x;
-        float markerCenter = bar.InverseTransformPoint(
-            marker.TransformPoint(marker.rect.center)).x;
-        bool hit = markerCenter >= Mathf.Min(left, right) &&
-            markerCenter <= Mathf.Max(left, right);
+        Bounds markerBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, marker);
+        Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(bar, greenTarget);
+        bool hit = markerBounds.center.x >= targetBounds.min.x &&
+            markerBounds.center.x <= targetBounds.max.x;
         if (hit)
         {
             hits++;
             AudioManager.Play(SoundCue.WoodHit);
             woodHit?.Invoke();
             bar.DOKill();
+            bar.anchoredPosition = barLayout.Position;
+            bar.localScale = Vector3.one;
             bar.DOPunchScale(Vector3.one * hitPunchStrength, 0.2f, 4);
         }
         else
         {
             AudioManager.Play(SoundCue.WoodMiss);
             bar.DOKill();
+            bar.anchoredPosition = barLayout.Position;
             bar.DOShakeAnchorPos(0.22f, missShakeStrength, 12, 90f, false, true);
         }
         round++;
@@ -303,6 +292,8 @@ public sealed class GatheringMinigame : MonoBehaviour
         markerX = -markerLimit;
         markerDirection = 1f;
         marker.anchoredPosition = new Vector2(markerX + markerPivotOffset, marker.anchoredPosition.y);
+        if (title != null)
+            title.text = "MADEIRA: ACERTE O VERDE\n" + (round + 1) + "/" + rounds + " · ACERTOS: " + hits;
     }
 
     private void StartFishing()
@@ -310,6 +301,8 @@ public sealed class GatheringMinigame : MonoBehaviour
         fishingProgress = initialFishingProgress;
         fishingElapsed = 0f;
         UpdateFishingFill();
+        if (title != null)
+            title.text = fishingPlus ? "PESCA PLUS\n2 OU 4 PEIXES" : "PESCA\n1 OU 2 PEIXES";
     }
 
     private void UpdateFishingFill()

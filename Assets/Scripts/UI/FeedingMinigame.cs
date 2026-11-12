@@ -32,11 +32,13 @@ public sealed class FeedingMinigame : MonoBehaviour
     private bool open;
     private FeedingFoodIcon reservedIcon;
     private Tween backEntrance;
+    private Vector3 panelSceneScale;
     private static readonly SaleItem[] FoodKinds = { SaleItem.Food, SaleItem.Fish,
         SaleItem.Corn, SaleItem.Pumpkin, SaleItem.Jerimum, SaleItem.Milk, SaleItem.Eggs };
 
     private void Awake()
     {
+        if (panel != null) panelSceneScale = panel.localScale;
         if (finishButton != null) finishButton.onClick.AddListener(Finish);
         if (backButton != null) backButton.onClick.AddListener(Cancel);
         Hide();
@@ -56,8 +58,13 @@ public sealed class FeedingMinigame : MonoBehaviour
         Action onCancelled = null)
     {
         workers = dayWorkers;
-        EnsureWorkerTargets(workers.Length);
-        LayoutWorkerTargets();
+        // Os dois cards atuais já têm tamanho e posição definidos na cena.
+        // O arranjo automático só é necessário para slots adicionais.
+        if (workers.Length > workerTargets.Length)
+        {
+            EnsureWorkerTargets(workers.Length);
+            LayoutWorkerTargets();
+        }
         reservedIcon = null;
         chosenFood = new SaleItem?[workers.Length];
         for (int i = 0; i < workerTargets.Length; i++)
@@ -81,8 +88,8 @@ public sealed class FeedingMinigame : MonoBehaviour
         group.interactable = true;
         group.blocksRaycasts = true;
         panel.DOKill();
-        panel.localScale = Vector3.one * 0.92f;
-        panel.DOScale(1f, entranceDuration).SetEase(Ease.OutBack);
+        panel.localScale = panelSceneScale * 0.92f;
+        panel.DOScale(panelSceneScale, entranceDuration).SetEase(Ease.OutBack);
         Refresh(true);
         int visibleFoods = 0;
         foreach (SaleItem kind in FoodKinds)
@@ -176,8 +183,7 @@ public sealed class FeedingMinigame : MonoBehaviour
         AudioManager.Play(SoundCue.FeedingAssigned);
         RectTransform worker = workerTargets[target];
         worker.DOKill();
-        worker.localScale = Vector3.one;
-        worker.DOPunchScale(Vector3.one * 0.12f, 0.3f, 1);
+        worker.DOPunchScale(worker.localScale * 0.12f, 0.3f, 1);
         float restY = worker.anchoredPosition.y;
         worker.DOAnchorPosY(restY + 5f, 0.16f).SetLoops(2, LoopType.Yoyo)
             .SetEase(Ease.OutSine);

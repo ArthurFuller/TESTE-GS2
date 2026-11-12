@@ -25,6 +25,7 @@ public sealed class EventCardView : MonoBehaviour
     private Vector2 descriptionHomePosition;
     private Vector2 revealedCardPosition;
     private Vector2 originalCardSize;
+    private Vector2 originalRevealPosition;
     private RectTransform descriptionRect;
     private Image cardImage;
     private Color frontColor;
@@ -43,6 +44,8 @@ public sealed class EventCardView : MonoBehaviour
             originalCardSize = card.sizeDelta;
             cardImage = card.GetComponent<Image>();
             if (revealButton == null) revealButton = card.GetComponentInChildren<Button>(true);
+            if (revealButton != null)
+                originalRevealPosition = ((RectTransform)revealButton.transform).anchoredPosition;
         }
         if (cardImage != null)
         {
@@ -67,9 +70,9 @@ public sealed class EventCardView : MonoBehaviour
         if (revealButton != null)
         {
             RectTransform button = (RectTransform)revealButton.transform;
-            button.anchoredPosition = new Vector2(
-                (card.rect.width - button.rect.width) * 0.5f,
-                -card.rect.height - 12f);
+            button.anchoredPosition = originalRevealPosition + new Vector2(
+                (0.5f - button.anchorMin.x) * (card.rect.width - originalCardSize.x),
+                -(1f - button.anchorMin.y) * (card.rect.height - originalCardSize.y));
         }
         if (descriptionRect == null) return;
         float left = -(card.rect.width + revealedGap + descriptionRect.rect.width) * 0.5f;
@@ -203,6 +206,8 @@ public sealed class EventCardView : MonoBehaviour
             card.localScale = Vector3.one;
             card.localRotation = Quaternion.identity;
         }
+        if (revealButton != null)
+            ((RectTransform)revealButton.transform).anchoredPosition = originalRevealPosition;
         if (cardImage != null)
         {
             cardImage.sprite = originalSprite;
