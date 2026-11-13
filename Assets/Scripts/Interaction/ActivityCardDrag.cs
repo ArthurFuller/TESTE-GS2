@@ -13,6 +13,11 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
     [SerializeField] private Camera worldCamera;
     [SerializeField] private DragCursorPreview preview;
     [SerializeField] private SeedMerchant shop;
+    [Header("Dissolucao descartavel")]
+    [SerializeField, Min(0.05f)] private float dissolveMoveDuration = 0.55f;
+    [SerializeField, Min(0f)] private float dissolvePause = 0.2f;
+    [SerializeField, Min(0.05f)] private float dissolveDuration = 1.4f;
+    [SerializeField, Min(1f)] private float dissolveCenterScale = 1.7f;
 
     private WorkerAssignment hoveredWorker;
     private bool dragging;
@@ -255,8 +260,8 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         Canvas canvas = GetComponentInParent<Canvas>();
         RectTransform canvasRoot = canvas != null ? canvas.rootCanvas.transform as RectTransform : null;
         Image source = GetComponent<Image>();
-        Shader shader = Resources.Load<Shader>("CardDissolve");
-        if (canvasRoot == null || source == null || shader == null)
+        Material preset = Resources.Load<Material>("CardDissolveMaterial");
+        if (canvasRoot == null || source == null || preset == null)
         {
             returning = false;
             onFinished?.Invoke();
@@ -270,7 +275,7 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             canvas.rootCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null :
                 canvas.rootCanvas.worldCamera, out Vector2 start);
         var visual = new GameObject("Carta descartada - dissolucao", typeof(RectTransform),
-            typeof(CanvasRenderer), typeof(Image), typeof(CanvasGroup));
+            typeof(CanvasRenderer), typeof(Image));
         RectTransform ghost = (RectTransform)visual.transform;
         ghost.SetParent(canvasRoot, false);
         ghost.anchorMin = ghost.anchorMax = Vector2.one * 0.5f;
@@ -283,29 +288,10 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
         art.type = source.type;
         art.color = source.color;
         art.raycastTarget = false;
-        Material ghostMaterial = new Material(shader);
+        Material ghostMaterial = new Material(preset);
+        ghostMaterial.SetFloat("_Cutoff", 0f);
+        ghostMaterial.SetVector("_RectSize", new Vector4(ghost.rect.width, ghost.rect.height, 0f, 0f));
         art.material = ghostMaterial;
-        Text title = GetComponentInChildren<Text>(true);
-        CanvasGroup group = visual.GetComponent<CanvasGroup>();
-        group.blocksRaycasts = false;
-        if (title != null)
-        {
-            var label = new GameObject("Titulo", typeof(RectTransform),
-                typeof(CanvasRenderer), typeof(Text));
-            RectTransform tr = (RectTransform)label.transform;
-            tr.SetParent(ghost, false);
-            tr.anchorMin = Vector2.zero;
-            tr.anchorMax = Vector2.one;
-            tr.offsetMin = new Vector2(8f, 6f);
-            tr.offsetMax = new Vector2(-8f, -6f);
-            Text text = label.GetComponent<Text>();
-            text.font = title.font;
-            text.fontSize = title.fontSize;
-            text.alignment = title.alignment;
-            text.text = title.text;
-            text.color = title.color;
-            text.raycastTarget = false;
-        }
 
         CanvasGroup original = GetComponent<CanvasGroup>();
         if (original == null) original = gameObject.AddComponent<CanvasGroup>();
@@ -321,11 +307,11 @@ public sealed class ActivityCardDrag : MonoBehaviour, IBeginDragHandler, IDragHa
             Destroy(visual);
         }
         DOTween.Sequence().SetTarget(ghost)
-            .Append(ghost.DOAnchorPos(Vector2.zero, 0.38f).SetEase(Ease.OutCubic))
-            .Join(ghost.DOScale(ghost.localScale * 1.04f, 0.38f))
+            .Append(ghost.DOAnchorPos(Vector2.zero, dissolveMoveDuration).SetEase(Ease.OutCubic))
+            .Join(ghost.DOScale(dissolveCenterScale, dissolveMoveDuration).SetEase(Ease.OutCubic))
+            .AppendInterval(dissolvePause)
             .Append(DOTween.To(() => ghostMaterial.GetFloat("_Cutoff"),
-                value => ghostMaterial.SetFloat("_Cutoff", value), 1f, 0.34f))
-            .Join(group.DOFade(0f, 0.34f))
+                value => ghostMaterial.SetFloat("_Cutoff", value), 1f, dissolveDuration))
             .OnComplete(() =>
             {
                 returning = false;

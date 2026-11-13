@@ -18,10 +18,20 @@ public sealed class CardRewardChoice : MonoBehaviour
     [SerializeField] private Button[] rerollButtons;
     [SerializeField, Min(0f)] private float floatDistance = 6f;
     [SerializeField, Min(0.1f)] private float floatDuration = 1.3f;
+    [Header("Transicao entre telas")]
+    [SerializeField, Min(0.05f)] private float transitionDuration = 0.62f;
+    [SerializeField, Min(0f)] private float transitionDistance = 80f;
+    [SerializeField, Min(0f)] private float cardEntranceDuration = 0.38f;
+    [SerializeField, Min(0f)] private float cardWaveDelay = 0.12f;
+    [SerializeField, Min(0f)] private float rerollEntranceDuration = 0.3f;
+    [SerializeField, Min(0f)] private float rerollWaveDelay = 0.08f;
+    [SerializeField, Min(0f)] private float innerFrameInset = 12f;
 
     private readonly ActivityCardDrag[] offered = new ActivityCardDrag[2];
     private readonly Vector2[] homes = new Vector2[2];
     private readonly Image[] glows = new Image[2];
+    private readonly Vector2[] glowHomes = new Vector2[2];
+    private readonly Vector2[] rerollHomes = new Vector2[2];
     private readonly bool[] rerolled = new bool[2];
     private readonly List<ActivityCardDrag> available = new List<ActivityCardDrag>();
     private readonly HashSet<ActivityKind> chosenKinds = new HashSet<ActivityKind>();
@@ -29,6 +39,14 @@ public sealed class CardRewardChoice : MonoBehaviour
     private readonly Text[] descriptions = new Text[2];
     private Action completed;
     private int currentDay;
+    private RectTransform panel;
+    private RectTransform innerViewport;
+    private RectMask2D innerMask;
+    private Vector2 panelHome;
+    private Sequence transition;
+    private bool transitioning;
+    private Image backdrop;
+    private Color backdropColor;
 
     private struct NameStyle
     {
@@ -76,12 +94,23 @@ public sealed class CardRewardChoice : MonoBehaviour
 
     private void Awake()
     {
+        if (group != null)
+        {
+            backdrop = group.GetComponent<Image>();
+            if (backdrop != null) backdropColor = backdrop.color;
+        }
+        if (choiceCards.Length > 0 && choiceCards[0] != null)
+        {
+            panel = choiceCards[0].parent as RectTransform;
+            if (panel != null) panelHome = panel.anchoredPosition;
+        }
         for (int i = 0; i < choiceCards.Length && i < 2; i++)
             if (choiceCards[i] != null)
             {
                 homes[i] = choiceCards[i].anchoredPosition;
                 Transform glow = choiceCards[i].parent.Find("Brilho " + (i + 1));
                 if (glow != null) glows[i] = glow.GetComponent<Image>();
+                if (glows[i] != null) glowHomes[i] = glows[i].rectTransform.anchoredPosition;
                 var tip = new GameObject("Descrição da carta", typeof(RectTransform),
                     typeof(CanvasRenderer), typeof(Image));
                 RectTransform tipRect = (RectTransform)tip.transform;
@@ -123,23 +152,28 @@ public sealed class CardRewardChoice : MonoBehaviour
         for (int i = 0; i < rerollButtons.Length && i < 2; i++)
         {
             if (rerollButtons[i] == null) continue;
+            rerollHomes[i] = ((RectTransform)rerollButtons[i].transform).anchoredPosition;
             int index = i;
             rerollButtons[i].onClick.AddListener(() => Reroll(index));
         }
+        EnsureInnerViewport();
         Hide();
     }
 
     private void OnDestroy()
     {
+        transition?.Kill();
         foreach (RectTransform card in choiceCards)
             if (card != null) card.DOKill();
         foreach (Image glow in glows)
             if (glow != null) glow.DOKill();
+        foreach (Button button in rerollButtons)
+            if (button != null) button.transform.DOKill();
     }
 
     private void Update()
     {
-        if (group == null || !group.interactable || Mouse.current == null) return;
+        if (group == null || transitioning || !group.interactable || Mouse.current == null) return;
         Vector2 pointer = Mouse.current.position.ReadValue();
         for (int i = 0; i < descriptions.Length; i++)
         {
@@ -152,6 +186,8 @@ public sealed class CardRewardChoice : MonoBehaviour
 
     public void Begin(int day, Action onCompleted)
     {
+        transition?.Kill();
+        transitioning = false;
         completed = onCompleted;
         currentDay = day;
         available.Clear();
@@ -195,16 +231,96 @@ public sealed class CardRewardChoice : MonoBehaviour
             if (card == null) continue;
             card.DOKill();
             card.anchoredPosition = homes[i];
-            card.DOAnchorPosY(homes[i].y + floatDistance, floatDuration)
-                .SetLoops(-1, LoopType.Yoyo).SetEase(Ease.InOutSine);
-            if (glows[i] != null)
-                glows[i].DOFade(0.7f, floatDuration).SetLoops(-1, LoopType.Yoyo)
-                    .SetEase(Ease.InOutSine);
+        }
+        UpdateRerollButtons();
+        transitioning = true;
+        if (backdrop != null)
+        {
+            backdrop.DOKill();
+            backdrop.color = new Color(backdropColor.r, backdropColor.g, backdropColor.b, 0f);
+            backdrop.DOFade(backdropColor.a, transitionDuration).SetEase(Ease.OutSine);
         }
         group.alpha = 1f;
         group.interactable = true;
         group.blocksRaycasts = true;
-        UpdateRerollButtons();
+        if (panel != null)
+        {
+            panel.DOKill();
+            RectTransform parent = panel.parent as RectTransform;
+            float below = parent != null ? (parent.rect.height + panel.rect.height) * 0.5f +
+                transitionDistance : panel.rect.height + transitionDistance;
+            panel.anchoredPosition = panelHome + Vector2.down * below;
+        }
+        if (innerMask != null) innerMask.enabled = true;
+        float cardsEnd = cardEntranceDuration + cardWaveDelay;
+        float contentEnd = cardsEnd;
+        for (int i = 0; i < 2; i++)
+        {
+            RectTransform card = choiceCards[i];
+            if (card != null)
+                EnterFromBelow(card, homes[i], transitionDuration + i * cardWaveDelay,
+                    cardEntranceDuration);
+            if (glows[i] != null)
+                EnterFromBelow(glows[i].rectTransform, glowHomes[i],
+                    transitionDuration + i * cardWaveDelay, cardEntranceDuration);
+            if (i >= rerollButtons.Length || rerollButtons[i] == null ||
+                !rerollButtons[i].gameObject.activeSelf) continue;
+            RectTransform button = (RectTransform)rerollButtons[i].transform;
+            EnterFromBelow(button, rerollHomes[i], transitionDuration + cardsEnd +
+                i * rerollWaveDelay, rerollEntranceDuration);
+            contentEnd = Mathf.Max(contentEnd, cardsEnd + i * rerollWaveDelay +
+                rerollEntranceDuration);
+        }
+        transition = DOTween.Sequence().SetTarget(this)
+            .AppendInterval(transitionDuration + contentEnd)
+            .OnComplete(() =>
+            {
+                transitioning = false;
+                if (innerMask != null) innerMask.enabled = false;
+                for (int i = 0; i < choiceCards.Length && i < 2; i++)
+                {
+                    RectTransform card = choiceCards[i];
+                    if (card != null)
+                        card.DOAnchorPosY(homes[i].y + floatDistance, floatDuration)
+                            .SetLoops(-1, LoopType.Yoyo).SetEase(Ease.InOutSine);
+                    if (glows[i] != null)
+                        glows[i].DOFade(0.7f, floatDuration).SetLoops(-1, LoopType.Yoyo)
+                            .SetEase(Ease.InOutSine);
+                }
+            });
+        if (panel != null)
+            transition.Insert(0f, panel.DOAnchorPos(panelHome, transitionDuration)
+                .SetEase(Ease.InOutSine));
+    }
+
+    private void EnsureInnerViewport()
+    {
+        if (panel == null || innerViewport != null) return;
+        var area = new GameObject("Área interna da escolha", typeof(RectTransform),
+            typeof(RectMask2D));
+        innerViewport = (RectTransform)area.transform;
+        innerViewport.SetParent(panel, false);
+        innerViewport.anchorMin = Vector2.zero;
+        innerViewport.anchorMax = Vector2.one;
+        innerViewport.offsetMin = new Vector2(innerFrameInset, innerFrameInset);
+        innerViewport.offsetMax = new Vector2(-innerFrameInset, -innerFrameInset);
+        innerMask = area.GetComponent<RectMask2D>();
+        for (int i = 0; i < 2; i++)
+        {
+            if (glows[i] != null) glows[i].transform.SetParent(innerViewport, false);
+            if (choiceCards[i] != null) choiceCards[i].SetParent(innerViewport, false);
+            if (i < rerollButtons.Length && rerollButtons[i] != null)
+                rerollButtons[i].transform.SetParent(innerViewport, false);
+        }
+    }
+
+    private void EnterFromBelow(RectTransform item, Vector2 home, float delay, float duration)
+    {
+        if (item == null || innerViewport == null) return;
+        item.DOKill();
+        item.anchoredPosition = new Vector2(home.x,
+            innerViewport.rect.yMin - item.rect.yMax - 8f);
+        item.DOAnchorPos(home, duration).SetDelay(delay).SetEase(Ease.OutBack);
     }
 
     private void AddAvailable(ActivityCardDrag card)
@@ -246,7 +362,7 @@ public sealed class CardRewardChoice : MonoBehaviour
 
     private void Reroll(int index)
     {
-        if (completed == null || currentDay <= 1 || rerolled[index]) return;
+        if (transitioning || completed == null || currentDay <= 1 || rerolled[index]) return;
         var alternatives = new List<ActivityCardDrag>();
         foreach (ActivityCardDrag card in available)
             if (card.Kind != offered[0].Kind && card.Kind != offered[1].Kind)
@@ -281,24 +397,63 @@ public sealed class CardRewardChoice : MonoBehaviour
 
     private void Choose(int index)
     {
-        if (completed == null || index < 0 || index >= 2 || offered[index] == null) return;
+        if (transitioning || completed == null || index < 0 || index >= 2 || offered[index] == null) return;
         if (!hand.QueueRewardCard(offered[index].Kind)) return;
         chosenKinds.Add(offered[index].Kind);
         AudioManager.Play(SoundCue.CardReward);
-        Hide();
         Action callback = completed;
         completed = null;
-        callback?.Invoke();
+        transitioning = true;
+        group.blocksRaycasts = true;
+        foreach (Text description in descriptions)
+            if (description != null) description.transform.parent.gameObject.SetActive(false);
+        foreach (RectTransform card in choiceCards)
+            if (card != null) card.DOKill();
+        transition?.Kill();
+        transition = DOTween.Sequence().SetTarget(this)
+            .AppendInterval(transitionDuration)
+            .OnComplete(() =>
+            {
+                Hide();
+                callback?.Invoke();
+            });
+        if (panel != null)
+        {
+            RectTransform parent = panel.parent as RectTransform;
+            float left = parent != null ? (parent.rect.width + panel.rect.width) * 0.5f +
+                transitionDistance : panel.rect.width + transitionDistance;
+            transition.Insert(0f, panel.DOAnchorPosX(panelHome.x - left,
+                transitionDuration).SetEase(Ease.InOutSine));
+        }
+        if (backdrop != null)
+            backdrop.DOFade(0f, transitionDuration).SetEase(Ease.InOutCubic);
     }
 
     private void Hide()
     {
         if (group == null) return;
+        transitioning = false;
+        if (backdrop != null)
+        {
+            backdrop.DOKill();
+            backdrop.color = backdropColor;
+        }
+        group.DOKill();
+        if (panel != null)
+        {
+            panel.DOKill();
+            panel.anchoredPosition = panelHome;
+        }
+        if (innerMask != null) innerMask.enabled = false;
         group.alpha = 0f;
         group.interactable = false;
         group.blocksRaycasts = false;
         foreach (Button button in rerollButtons)
-            if (button != null) button.gameObject.SetActive(false);
+            if (button != null)
+            {
+                button.transform.DOKill();
+                button.gameObject.SetActive(false);
+            }
         foreach (Text description in descriptions)
             if (description != null) description.transform.parent.gameObject.SetActive(false);
         for (int i = 0; i < choiceCards.Length && i < 2; i++)
@@ -314,5 +469,11 @@ public sealed class CardRewardChoice : MonoBehaviour
                 Color color = glow.color;
                 glow.color = new Color(color.r, color.g, color.b, 0.38f);
             }
+        for (int i = 0; i < 2; i++)
+        {
+            if (glows[i] != null) glows[i].rectTransform.anchoredPosition = glowHomes[i];
+            if (i < rerollButtons.Length && rerollButtons[i] != null)
+                ((RectTransform)rerollButtons[i].transform).anchoredPosition = rerollHomes[i];
+        }
     }
 }

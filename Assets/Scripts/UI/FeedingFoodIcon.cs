@@ -26,6 +26,9 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
 
     public void Configure(FeedingMinigame feedingGame, SaleItem kind, Sprite sprite, Font font)
     {
+        // Inactive food entries have not received Awake when the menu first opens.
+        if (rect == null) rect = (RectTransform)transform;
+        if (image == null) image = itemImage != null ? itemImage : GetComponent<Image>();
         game = feedingGame;
         Kind = kind;
         if (image != null)
@@ -54,7 +57,13 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
     public void SetHome(Vector2 home, bool enterFromTop, float delay, float duration)
     {
         rect.DOKill();
-        if (enterFromTop) rect.anchoredPosition = home + Vector2.up * 110f;
+        if (enterFromTop)
+        {
+            RectTransform viewport = rect.parent as RectTransform;
+            float hiddenY = viewport != null ? viewport.rect.yMax - rect.rect.yMin + 8f :
+                home.y + 110f;
+            rect.anchoredPosition = new Vector2(home.x, hiddenY);
+        }
         rect.DOAnchorPos(home, duration).SetDelay(delay).SetEase(Ease.OutBack)
             .OnComplete(() => rect.DOAnchorPosY(home.y + 5f, 0.9f)
                 .SetLoops(-1, LoopType.Yoyo).SetEase(Ease.InOutSine));

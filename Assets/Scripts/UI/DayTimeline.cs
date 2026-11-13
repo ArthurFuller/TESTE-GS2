@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [ExecuteAlways]
@@ -27,6 +28,7 @@ public sealed class DayTimeline : MonoBehaviour
     [SerializeField, Min(24f)] private float dayButtonWidth = 34f;
     [SerializeField, Min(20f)] private float dayButtonHeight = 22f;
     [SerializeField, Min(1f)] private float dayLineHeight = 3f;
+    [SerializeField, Min(0f)] private float dayEndPadding = 60f;
     [Header("Cartas geradas no histórico")]
     [SerializeField, Min(45f)] private float cardWidth = 60f;
     [SerializeField, Min(65f)] private float cardHeight = 83f;
@@ -363,7 +365,7 @@ public sealed class DayTimeline : MonoBehaviour
         panel.pivot = new Vector2(1f, 1f);
         panel.sizeDelta = new Vector2(panelWidth, viewedDay > 0 ? cardsHeight : daysHeight);
         if (!Application.isPlaying) panel.anchoredPosition = Vector2.zero;
-        Fill(dayRow, 0f, 0f);
+        Fill(dayRow, 16f, 0f);
         dayContent.anchorMin = dayContent.anchorMax = new Vector2(0f, 1f);
         dayContent.pivot = new Vector2(0f, 1f);
         cardScroll.anchorMin = new Vector2(0f, 1f);
@@ -437,7 +439,7 @@ public sealed class DayTimeline : MonoBehaviour
                 rightEdge = Mathf.Max(rightEdge,
                     node.anchoredPosition.x + node.rect.width * (1f - node.pivot.x));
         dayContent.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal,
-            Mathf.Max(dayRow.rect.width, rightEdge + dayButtonWidth));
+            Mathf.Max(dayRow.rect.width, rightEdge + dayEndPadding));
         foreach (RectTransform line in dayLines)
             if (!Application.isPlaying || !dayHomeY.ContainsKey(line))
                 dayHomeY[line] = line.anchoredPosition.y;
@@ -755,6 +757,11 @@ public sealed class DayTimeline : MonoBehaviour
                 card.Description, false);
     }
 
+    public void InspectEventCard(RectTransform source, DayEventController.TimelineEvent active)
+    {
+        InspectCard(source, active.Title, active.Description, false);
+    }
+
     private void InspectCard(RectTransform source, string cardName,
         string description, bool fromTimeline)
     {
@@ -770,11 +777,12 @@ public sealed class DayTimeline : MonoBehaviour
             screen, camera, out Vector2 start);
         inspectionFromTimeline = fromTimeline;
 
-        inspectionShade = Box("Fundo da inspeção", root, Color.clear, true);
+        inspectionShade = Box("Fundo da inspeção", root, Color.clear, false);
         Fill(inspectionShade, 0f, 0f);
-        Button backdrop = inspectionShade.GetComponent<Button>();
-        backdrop.transition = Selectable.Transition.None;
-        backdrop.onClick.AddListener(() => CloseInspection(false));
+        EventTrigger backdrop = inspectionShade.gameObject.AddComponent<EventTrigger>();
+        var closeOnClick = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+        closeOnClick.callback.AddListener(_ => CloseInspection(false));
+        backdrop.triggers.Add(closeOnClick);
         inspectionCard = Box("Carta em inspeção", root, Color.white, false);
         inspectionCard.anchorMin = inspectionCard.anchorMax = new Vector2(0.5f, 0.5f);
         inspectionCard.pivot = new Vector2(0.5f, 0.5f);

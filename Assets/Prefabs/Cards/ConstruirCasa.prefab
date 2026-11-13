@@ -95,6 +95,10 @@ MonoBehaviour:
   activity: 17
   worldCamera: {fileID: 0}
   preview: {fileID: 0}
+  dissolveMoveDuration: 0.55
+  dissolvePause: 0.2
+  dissolveDuration: 1.4
+  dissolveCenterScale: 1.7
 --- !u!1 &1280088960033582712
 GameObject:
   m_ObjectHideFlags: 0

@@ -253,3 +253,7 @@ MonoBehaviour:
   activity: 18
   worldCamera: {fileID: 0}
   preview: {fileID: 0}
+  dissolveMoveDuration: 0.55
+  dissolvePause: 0.2
+  dissolveDuration: 1.4
+  dissolveCenterScale: 1.7

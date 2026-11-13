@@ -24,21 +24,40 @@ public sealed class FeedingMinigame : MonoBehaviour
     [SerializeField] private Button backButton;
     [SerializeField, Min(0f)] private float entranceDuration = 0.45f;
     [SerializeField, Min(0f)] private float foodWaveDelay = 0.07f;
+    [SerializeField, Min(0f)] private float workerEntranceDuration = 0.38f;
+    [SerializeField, Min(0f)] private float workerWaveDelay = 0.1f;
+    [SerializeField, Min(0f)] private float innerFrameInset = 16f;
+    [Header("Transicao entre telas")]
+    [SerializeField, Min(0.05f)] private float transitionDuration = 0.62f;
+    [SerializeField, Min(0f)] private float transitionDistance = 80f;
 
     private WorkerAssignment[] workers;
     private SaleItem?[] chosenFood;
     private Action<SaleItem?[]> completed;
     private Action cancelled;
     private bool open;
+    private bool transitioning;
+    private Image backdrop;
+    private Color backdropColor;
+    private RectTransform innerViewport;
     private FeedingFoodIcon reservedIcon;
     private Tween backEntrance;
+    private Sequence transition;
     private Vector3 panelSceneScale;
+    private Vector2 panelHome;
     private static readonly SaleItem[] FoodKinds = { SaleItem.Food, SaleItem.Fish,
         SaleItem.Corn, SaleItem.Pumpkin, SaleItem.Jerimum, SaleItem.Milk, SaleItem.Eggs };
 
     private void Awake()
     {
+        if (group != null)
+        {
+            backdrop = group.GetComponent<Image>();
+            if (backdrop != null) backdropColor = backdrop.color;
+        }
         if (panel != null) panelSceneScale = panel.localScale;
+        if (panel != null) panelHome = panel.anchoredPosition;
+        EnsureInnerViewport();
         if (finishButton != null) finishButton.onClick.AddListener(Finish);
         if (backButton != null) backButton.onClick.AddListener(Cancel);
         Hide();
@@ -49,7 +68,10 @@ public sealed class FeedingMinigame : MonoBehaviour
         if (finishButton != null) finishButton.onClick.RemoveListener(Finish);
         if (backButton != null) backButton.onClick.RemoveListener(Cancel);
         backEntrance?.Kill();
+        transition?.Kill();
         if (panel != null) panel.DOKill();
+        foreach (RectTransform worker in workerTargets)
+            if (worker != null) worker.DOKill();
         foreach (FeedingFoodIcon icon in foodIcons)
             if (icon != null) icon.StopAnimation();
     }
@@ -57,6 +79,9 @@ public sealed class FeedingMinigame : MonoBehaviour
     public void Begin(WorkerAssignment[] dayWorkers, Action<SaleItem?[]> onCompleted,
         Action onCancelled = null)
     {
+        transition?.Kill();
+        // The scene may keep this panel disabled for editor layout work.
+        if (panel != null) panel.gameObject.SetActive(true);
         workers = dayWorkers;
         // Os dois cards atuais já têm tamanho e posição definidos na cena.
         // O arranjo automático só é necessário para slots adicionais.
@@ -71,7 +96,8 @@ public sealed class FeedingMinigame : MonoBehaviour
         {
             if (workerTargets[i] == null) continue;
             Animator character = workerTargets[i].GetComponent<Animator>();
-            if (character != null) character.Play("Idle", 0, 0f);
+            if (character != null && character.gameObject.activeInHierarchy)
+                character.Play("Idle", 0, 0f);
             FeedingReaction reaction = workerTargets[i].GetComponentInChildren<FeedingReaction>(true);
             if (reaction != null) reaction.ResetVisual();
         }
@@ -84,18 +110,69 @@ public sealed class FeedingMinigame : MonoBehaviour
             backButton.gameObject.SetActive(false);
             backButton.transform.localScale = Vector3.one;
         }
+        transitioning = true;
+        if (backdrop != null)
+        {
+            backdrop.DOKill();
+            backdrop.color = new Color(backdropColor.r, backdropColor.g, backdropColor.b, 0f);
+            backdrop.DOFade(backdropColor.a, transitionDuration).SetEase(Ease.OutSine);
+        }
         group.alpha = 1f;
         group.interactable = true;
         group.blocksRaycasts = true;
         panel.DOKill();
-        panel.localScale = panelSceneScale * 0.92f;
-        panel.DOScale(panelSceneScale, entranceDuration).SetEase(Ease.OutBack);
-        Refresh(true);
+        RectTransform parent = panel.parent as RectTransform;
+        float below = parent != null ? (parent.rect.height + panel.rect.height) * 0.5f +
+            transitionDistance : panel.rect.height + transitionDistance;
+        panel.anchoredPosition = panelHome + Vector2.down * below;
+        panel.localScale = panelSceneScale;
+        transition = DOTween.Sequence().SetTarget(this)
+            .Append(panel.DOAnchorPos(panelHome, transitionDuration).SetEase(Ease.InOutSine));
+        AnimateWorkers();
+        Refresh(true, transitionDuration);
         int visibleFoods = 0;
         foreach (SaleItem kind in FoodKinds)
             if (Stock(kind) > 0) visibleFoods++;
-        float waveEnd = entranceDuration + Mathf.Max(0, visibleFoods - 1) * foodWaveDelay;
+        float waveEnd = transitionDuration + Mathf.Max(
+            entranceDuration + Mathf.Max(0, visibleFoods - 1) * foodWaveDelay,
+            workerEntranceDuration + Mathf.Max(0, workers.Length - 1) * workerWaveDelay);
+        transition.AppendInterval(waveEnd - transitionDuration)
+            .OnComplete(() => transitioning = false);
         backEntrance = DOVirtual.DelayedCall(waveEnd, ShowBackButton).SetTarget(this);
+    }
+
+    private void EnsureInnerViewport()
+    {
+        if (panel == null || innerViewport != null) return;
+        var area = new GameObject("Área interna da alimentação", typeof(RectTransform),
+            typeof(RectMask2D));
+        innerViewport = (RectTransform)area.transform;
+        innerViewport.SetParent(panel, false);
+        innerViewport.anchorMin = Vector2.zero;
+        innerViewport.anchorMax = Vector2.one;
+        innerViewport.offsetMin = new Vector2(innerFrameInset, innerFrameInset);
+        innerViewport.offsetMax = new Vector2(-innerFrameInset, -innerFrameInset);
+        foreach (RectTransform worker in workerTargets)
+            if (worker != null) worker.SetParent(innerViewport, false);
+        foreach (FeedingFoodIcon icon in foodIcons)
+            if (icon != null) icon.transform.SetParent(innerViewport, false);
+    }
+
+    private void AnimateWorkers()
+    {
+        if (innerViewport == null) return;
+        for (int i = 0; i < workerTargets.Length && i < workers.Length; i++)
+        {
+            RectTransform worker = workerTargets[i];
+            if (worker == null) continue;
+            worker.DOKill();
+            Vector2 home = worker.anchoredPosition;
+            worker.anchoredPosition = new Vector2(home.x,
+                innerViewport.rect.yMin - worker.rect.yMax - 8f);
+            worker.DOAnchorPos(home, workerEntranceDuration)
+                .SetDelay(transitionDuration + i * workerWaveDelay)
+                .SetEase(Ease.OutBack);
+        }
     }
 
     private void ShowBackButton()
@@ -119,7 +196,8 @@ public sealed class FeedingMinigame : MonoBehaviour
         Array.Resize(ref workerLabels, count);
         for (int i = oldCount; i < count; i++)
         {
-            RectTransform target = Instantiate(workerTargets[oldCount - 1], panel);
+            RectTransform target = Instantiate(workerTargets[oldCount - 1],
+                innerViewport != null ? innerViewport : panel);
             target.name = "Trabalhador " + (i + 1);
             workerTargets[i] = target;
             workerLabels[i] = target.GetComponentInChildren<Text>(true);
@@ -148,7 +226,7 @@ public sealed class FeedingMinigame : MonoBehaviour
 
     public bool Reserve(FeedingFoodIcon icon)
     {
-        if (!open || reservedIcon != null || Stock(icon.Kind) == 0) return false;
+        if (!open || transitioning || reservedIcon != null || Stock(icon.Kind) == 0) return false;
         reservedIcon = icon;
         icon.SetQuantity(Stock(icon.Kind) - 1);
         return true;
@@ -163,7 +241,7 @@ public sealed class FeedingMinigame : MonoBehaviour
 
     public RectTransform FeedFromIcon(FeedingFoodIcon icon, PointerEventData eventData)
     {
-        if (!open || reservedIcon != icon) return null;
+        if (!open || transitioning || reservedIcon != icon) return null;
         int target = -1;
         for (int i = 0; i < workerTargets.Length && i < chosenFood.Length; i++)
             if (CanFeed(i) && RectTransformUtility.RectangleContainsScreenPoint(
@@ -218,7 +296,7 @@ public sealed class FeedingMinigame : MonoBehaviour
         _ => false
     };
 
-    private void Refresh(bool animate)
+    private void Refresh(bool animate, float entranceDelay = 0f)
     {
         if (foodCount != null) foodCount.text = "Escolha um alimento para cada trabalhador";
         RefreshLabels();
@@ -238,7 +316,8 @@ public sealed class FeedingMinigame : MonoBehaviour
                 foodCount != null ? foodCount.font : null);
             icon.SetQuantity(Stock(kind) - (reservedIcon == icon ? 1 : 0));
             icon.SetHome(new Vector2((visibleIndex - (visibleCount - 1) * 0.5f) * 73f, 54f),
-                animate, visibleIndex * foodWaveDelay, animate ? entranceDuration : 0.18f);
+                animate, entranceDelay + visibleIndex * foodWaveDelay,
+                animate ? entranceDuration : 0.18f);
             visibleIndex++;
         }
     }
@@ -275,22 +354,37 @@ public sealed class FeedingMinigame : MonoBehaviour
 
     public void Finish()
     {
-        if (!open) return;
+        if (!open || transitioning) return;
         open = false;
+        transitioning = true;
+        group.blocksRaycasts = true;
         if (reservedIcon != null) CancelReservation(reservedIcon);
         foreach (FeedingFoodIcon icon in foodIcons)
             if (icon != null) icon.StopAnimation();
-        Hide();
         AudioManager.Play(SoundCue.FeedingCompleted);
         Action<SaleItem?[]> callback = completed;
         completed = null;
         cancelled = null;
-        callback?.Invoke(chosenFood);
+        SaleItem?[] result = chosenFood;
+        transition?.Kill();
+        RectTransform parent = panel.parent as RectTransform;
+        float left = parent != null ? (parent.rect.width + panel.rect.width) * 0.5f +
+            transitionDistance : panel.rect.width + transitionDistance;
+        transition = DOTween.Sequence().SetTarget(this)
+            .Append(panel.DOAnchorPosX(panelHome.x - left,
+                transitionDuration).SetEase(Ease.InOutSine))
+            .OnComplete(() =>
+            {
+                Hide();
+                callback?.Invoke(result);
+            });
+        if (backdrop != null)
+            backdrop.DOFade(0f, transitionDuration).SetEase(Ease.InOutCubic);
     }
 
     public void Cancel()
     {
-        if (!open) return;
+        if (!open || transitioning) return;
         open = false;
         if (reservedIcon != null) CancelReservation(reservedIcon);
         foreach (SaleItem? food in chosenFood)
@@ -318,6 +412,12 @@ public sealed class FeedingMinigame : MonoBehaviour
 
     private void Hide()
     {
+        transitioning = false;
+        if (backdrop != null)
+        {
+            backdrop.DOKill();
+            backdrop.color = backdropColor;
+        }
         backEntrance?.Kill();
         if (backButton != null)
         {
@@ -329,5 +429,10 @@ public sealed class FeedingMinigame : MonoBehaviour
         group.alpha = 0f;
         group.interactable = false;
         group.blocksRaycasts = false;
+        if (panel != null)
+        {
+            panel.anchoredPosition = panelHome;
+            panel.gameObject.SetActive(false);
+        }
     }
 }

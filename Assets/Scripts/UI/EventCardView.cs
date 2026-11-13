@@ -35,6 +35,7 @@ public sealed class EventCardView : MonoBehaviour
     private bool flipped;
     private Sequence revealMotion;
     public bool IsOpen { get; private set; }
+    public RectTransform CardRect => card;
     public event Action Closed;
 
     private void Awake()

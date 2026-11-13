@@ -281,7 +281,8 @@ public sealed class DayCycle : MonoBehaviour
 
     public void ContinueToNextDay()
     {
-        if (!summaryOpen || gameOver || actions.IsBusy)
+        if (!summaryOpen || gameOver || actions.IsBusy ||
+            (feedback != null && feedback.IsSummaryTransitioning))
             return;
 
         summaryOpen = false;
@@ -325,12 +326,14 @@ public sealed class DayCycle : MonoBehaviour
             {
                 AudioManager.Play(SoundCue.DayStart);
                 DayChanged?.Invoke();
+                dayEvents.ReleasePendingReward();
                 if (addAnimalResources) AddDailyAnimalResources();
             });
             return;
         }
         AudioManager.Play(SoundCue.DayStart);
         DayChanged?.Invoke();
+        dayEvents?.ReleasePendingReward();
         if (addAnimalResources) AddDailyAnimalResources();
     }
 
