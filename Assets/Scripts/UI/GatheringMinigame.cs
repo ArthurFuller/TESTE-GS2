@@ -8,6 +8,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField] private CanvasGroup group;
     [SerializeField] private RectTransform marker;
     [SerializeField] private RectTransform greenTarget;
+    [SerializeField] private RectTransform woodTrack;
     [Header("Arte dos minigames (objetos na cena)")]
     [SerializeField] private RectTransform woodArtRoot;
     [SerializeField] private RectTransform fishingArtRoot;
@@ -20,6 +21,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Range(0.3f, 1f)] private float speedMultiplierPerHit = 0.7f;
     [SerializeField, Min(0.2f)] private float minimumCrossingDuration = 0.55f;
     [SerializeField, Min(0f)] private float edgePadding = 8f;
+    [SerializeField, Min(0f)] private float targetSidePadding = 12f;
     [SerializeField, Min(2)] private int rounds = 3;
     [SerializeField, Min(0f)] private float minimumTargetSeparation = 45f;
     [SerializeField, Min(0f)] private float nearTargetSpeedBoost = 1.1f;
@@ -69,12 +71,12 @@ public sealed class GatheringMinigame : MonoBehaviour
     private Action fishDropped;
     private RectTransform bar, panel, buttonRect, titleRect;
     private Image barImage;
-    private Layout panelLayout, barLayout, markerLayout, targetLayout, titleLayout;
+    private Layout panelLayout, barLayout, markerLayout, titleLayout;
     private bool layoutCaptured, fishing, fishingPlus, resolving, entering;
     private bool fishingTensionStarted;
     private int round, hits;
     private float difficultyMultiplier, initialTargetWidth, previousTargetCenter;
-    private float markerX, markerLimit, markerPivotOffset, markerDirection;
+    private float markerX, markerMin, markerMax, markerPivotOffset, markerDirection;
     private float fishingProgress, fishingElapsed;
 
     public bool CanStart() => ResolveReferences();
@@ -104,7 +106,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         AudioManager.StopFishingPull();
         if (!ResolveReferences())
         {
-            Debug.LogError("Minigame sem marcador, faixa verde ou painel configurado.", this);
+            Debug.LogError("Minigame sem marcador, alvo ou painel configurado.", this);
             onCompleted?.Invoke(-1);
             return;
         }
@@ -155,7 +157,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         if (group == null || marker == null || marker.parent is not RectTransform parent) return false;
         bar = parent;
         barImage = bar.GetComponent<Image>();
-        if (greenTarget == null) greenTarget = bar.Find("Zona perfeita") as RectTransform;
+        if (greenTarget == null) greenTarget = bar.Find("Alvo - madeira") as RectTransform;
         if (greenTarget == null) return false;
         if (woodActionButton == null || fishingActionButton == null) return false;
         if (layoutCaptured) return true;
@@ -165,7 +167,6 @@ public sealed class GatheringMinigame : MonoBehaviour
         panelLayout = new Layout(panel);
         barLayout = new Layout(bar);
         markerLayout = new Layout(marker);
-        targetLayout = new Layout(greenTarget);
         if (titleRect != null) titleLayout = new Layout(titleRect);
         initialTargetWidth = greenTarget.rect.width * Mathf.Abs(greenTarget.localScale.x);
         layoutCaptured = initialTargetWidth > 0f;
@@ -180,9 +181,10 @@ public sealed class GatheringMinigame : MonoBehaviour
         marker.DOKill();
         greenTarget.DOKill();
         panelLayout.Apply(panel);
-        barLayout.Apply(bar);
+        bar.anchoredPosition = barLayout.Position;
+        bar.localScale = barLayout.Scale;
         markerLayout.Apply(marker);
-        targetLayout.Apply(greenTarget);
+        // O tamanho e a altura do alvo podem ser ajustados no Inspector durante o Play Mode.
         if (titleRect != null) titleLayout.Apply(titleRect);
     }
 
@@ -220,10 +222,10 @@ public sealed class GatheringMinigame : MonoBehaviour
             Mathf.Abs(markerX - previousTargetCenter) / Mathf.Max(1f, initialTargetWidth * 2.5f));
         float crossing = Mathf.Max(minimumCrossingDuration,
             markerCrossingDuration * Mathf.Pow(speedMultiplierPerHit, hits));
-        float speed = markerLimit * 2f / crossing * (1f + nearTargetSpeedBoost * proximity);
+        float speed = (markerMax - markerMin) / crossing * (1f + nearTargetSpeedBoost * proximity);
         markerX += markerDirection * speed * Time.deltaTime;
-        if (markerX >= markerLimit) { markerX = markerLimit; markerDirection = -1f; }
-        else if (markerX <= -markerLimit) { markerX = -markerLimit; markerDirection = 1f; }
+        if (markerX >= markerMax) { markerX = markerMax; markerDirection = -1f; }
+        else if (markerX <= markerMin) { markerX = markerMin; markerDirection = 1f; }
         marker.anchoredPosition = new Vector2(markerX + markerPivotOffset, marker.anchoredPosition.y);
     }
 
@@ -311,22 +313,33 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void StartWoodRound()
     {
-        float markerWidth = marker.rect.width;
-        float targetLimit = Mathf.Max(0f, bar.rect.width * 0.5f -
-            initialTargetWidth * 0.5f - edgePadding);
-        float targetCenter = UnityEngine.Random.Range(-targetLimit, targetLimit);
+        Bounds trackBounds = woodTrack != null
+            ? RectTransformUtility.CalculateRelativeRectTransformBounds(bar, woodTrack)
+            : new Bounds(bar.rect.center, bar.rect.size);
+        float targetHalfWidth = RectTransformUtility.CalculateRelativeRectTransformBounds(
+            bar, greenTarget).size.x * 0.5f;
+        initialTargetWidth = targetHalfWidth * 2f;
+        float targetMin = trackBounds.min.x + targetHalfWidth + targetSidePadding;
+        float targetMax = trackBounds.max.x - targetHalfWidth - targetSidePadding;
+        if (targetMin > targetMax) targetMin = targetMax = trackBounds.center.x;
+        float targetCenter = UnityEngine.Random.Range(targetMin, targetMax);
         for (int attempt = 0; attempt < 12 && !float.IsNaN(previousTargetCenter) &&
             Mathf.Abs(targetCenter - previousTargetCenter) < minimumTargetSeparation; attempt++)
-            targetCenter = UnityEngine.Random.Range(-targetLimit, targetLimit);
+            targetCenter = UnityEngine.Random.Range(targetMin, targetMax);
         if (!float.IsNaN(previousTargetCenter) &&
             Mathf.Abs(targetCenter - previousTargetCenter) < minimumTargetSeparation)
-            targetCenter = previousTargetCenter >= 0f ? -targetLimit : targetLimit;
+            targetCenter = previousTargetCenter >= trackBounds.center.x ? targetMin : targetMax;
         previousTargetCenter = targetCenter;
         greenTarget.anchoredPosition = new Vector2(targetCenter,
             greenTarget.anchoredPosition.y);
-        markerLimit = Mathf.Max(0f, (bar.rect.width - markerWidth - edgePadding * 2f) * 0.5f);
+        float markerHalfWidth = RectTransformUtility.CalculateRelativeRectTransformBounds(
+            bar, marker).size.x * 0.5f;
+        markerMin = trackBounds.min.x + markerHalfWidth + edgePadding;
+        markerMax = trackBounds.max.x - markerHalfWidth - edgePadding;
+        if (markerMin > markerMax) markerMin = markerMax = trackBounds.center.x;
+        float markerWidth = marker.rect.width;
         markerPivotOffset = (marker.pivot.x - 0.5f) * markerWidth;
-        markerX = -markerLimit;
+        markerX = markerMin;
         markerDirection = 1f;
         marker.anchoredPosition = new Vector2(markerX + markerPivotOffset, marker.anchoredPosition.y);
     }

@@ -141,8 +141,6 @@ public sealed class CommunityCameraEditor : Editor
         DrawProperty("farZoomPanRadius", "Expansão além do zoom out");
         DrawProperty("followDistance", "Distância ao trabalhador");
         DrawProperty("smoothTime", "Suavidade do movimento");
-        DrawProperty("communityButton", "Botão Comunidade");
-
         serializedObject.ApplyModifiedProperties();
     }
 

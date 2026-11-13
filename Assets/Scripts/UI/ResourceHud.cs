@@ -35,9 +35,13 @@ public sealed class ResourceHud : MonoBehaviour
     [SerializeField] private Sprite coinSprite;
     [SerializeField] private Sprite milkSprite;
     [SerializeField] private Sprite eggSprite;
-    [SerializeField, Min(1)] private int maximumFlyingIcons = 64;
     [SerializeField, Min(0.1f)] private float flightDuration = 0.55f;
-    [SerializeField, Min(0f)] private float iconInterval = 0.055f;
+    [SerializeField, Min(0f), Tooltip("Intervalo mínimo entre a chegada de dois recursos.")]
+    private float iconInterval = 0.22f;
+    [Header("Feedback do contador")]
+    [SerializeField, Min(1f)] private float counterPulseScale = 1.08f;
+    [SerializeField, Min(0.05f)] private float counterPulseDuration = 0.18f;
+    [SerializeField, Min(0.05f)] private float counterFlashDuration = 0.17f;
 
     private readonly int[] inFlight = new int[9];
     private Canvas canvas;
@@ -70,6 +74,8 @@ public sealed class ResourceHud : MonoBehaviour
 
     private Camera UiCamera => canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
         ? canvas.worldCamera : null;
+    private float ArrivalInterval => Mathf.Max(iconInterval,
+        counterPulseDuration, counterFlashDuration) + 0.02f;
 
     private void Awake()
     {
@@ -238,7 +244,7 @@ public sealed class ResourceHud : MonoBehaviour
             }
             rect.DOKill();
             Sequence flight = DOTween.Sequence().SetId(this);
-            flight.AppendInterval(i * iconInterval);
+            flight.AppendInterval(i * ArrivalInterval);
             flight.Append(FollowCounter(rect, target));
             flight.Join(rect.DOScale(0.4f, flightDuration).SetEase(Ease.InQuad));
             flight.OnComplete(() =>
@@ -272,11 +278,11 @@ public sealed class ResourceHud : MonoBehaviour
         if (topBar != null)
             pauseSeconds = Mathf.Max(pauseSeconds, topBar.PrepareResourceFeedback());
         Vector2 origin = CanvasPoint(screenOrigin);
-        int count = Mathf.Min(amount, Mathf.Max(1, maximumFlyingIcons));
+        int count = amount;
         int pending = count;
         for (int i = 0; i < count; i++)
             CreateIcon(kind, i, count, origin, target,
-                amount / count + (i < amount % count ? 1 : 0), pauseSeconds, () =>
+                1, pauseSeconds, () =>
                 {
                     if (--pending == 0) onAllArrived?.Invoke();
                 });
@@ -327,9 +333,9 @@ public sealed class ResourceHud : MonoBehaviour
         Sequence flight = DOTween.Sequence().SetId(this);
         if (kind == ResourceKind.Coins)
             flight.Append(rect.DOScale(1f, 0.15f).SetEase(Ease.OutBack))
-                .AppendInterval(0.08f + index * iconInterval);
+                .AppendInterval(0.08f + index * ArrivalInterval);
         else
-            flight.AppendInterval(index * iconInterval)
+            flight.AppendInterval(index * ArrivalInterval)
                 .Append(rect.DOScale(1f, 0.15f).SetEase(Ease.OutBack));
         if (pauseSeconds > 0f) flight.AppendInterval(pauseSeconds);
         flight.Append(FollowCounter(rect, target))
@@ -414,9 +420,7 @@ public sealed class ResourceHud : MonoBehaviour
         {
             displayed[index] = next;
             DrawCounter(kind);
-            // Frequent arrivals update the number individually without restarting every pulse.
-            if (counterPulses[index] == null || !counterPulses[index].IsActive())
-                FlashCounter(kind, 1);
+            FlashCounter(kind, 1);
         }
         Refresh();
     }
@@ -440,6 +444,8 @@ public sealed class ResourceHud : MonoBehaviour
         Color flash = direction < 0 ? new Color(0.95f, 0.14f, 0.14f) : Color.white;
         Text label = TargetFor(kind);
         Graphic icon = counterHover != null ? counterHover.IconFor(kind) : null;
+        float flashIn = counterFlashDuration * 0.32f;
+        float flashOut = counterFlashDuration - flashIn;
         counterPulses[index]?.Kill();
         Sequence pulse = DOTween.Sequence().SetTarget(this);
         counterPulses[index] = pulse;
@@ -447,15 +453,16 @@ public sealed class ResourceHud : MonoBehaviour
         {
             counterRoots[index].localScale = counterRootScales[index];
             pulse.Insert(0f, counterRoots[index]
-                .DOScale(counterRootScales[index] * 1.08f, 0.09f)
+                .DOScale(counterRootScales[index] * counterPulseScale,
+                    counterPulseDuration * 0.5f)
                 .SetLoops(2, LoopType.Yoyo).SetEase(Ease.OutQuad));
         }
         if (label != null)
         {
             label.DOKill();
             label.color = textColors[index];
-            pulse.Insert(0f, label.DOColor(flash, 0.055f));
-            pulse.Insert(0.055f, label.DOColor(textColors[index], 0.12f));
+            pulse.Insert(0f, label.DOColor(flash, flashIn));
+            pulse.Insert(flashIn, label.DOColor(textColors[index], flashOut));
         }
         if (icon != null)
         {
@@ -467,15 +474,15 @@ public sealed class ResourceHud : MonoBehaviour
                 material.SetColor(FlashColorId, flash);
                 material.SetFloat(FlashId, 0f);
                 pulse.Insert(0f, DOTween.To(() => material.GetFloat(FlashId),
-                    value => material.SetFloat(FlashId, value), 1f, 0.055f));
-                pulse.Insert(0.055f, DOTween.To(() => material.GetFloat(FlashId),
-                    value => material.SetFloat(FlashId, value), 0f, 0.12f));
+                    value => material.SetFloat(FlashId, value), 1f, flashIn));
+                pulse.Insert(flashIn, DOTween.To(() => material.GetFloat(FlashId),
+                    value => material.SetFloat(FlashId, value), 0f, flashOut));
             }
             else
             {
                 Color fallback = new Color(flash.r, flash.g, flash.b, iconColors[index].a);
-                pulse.Insert(0f, icon.DOColor(fallback, 0.055f));
-                pulse.Insert(0.055f, icon.DOColor(iconColors[index], 0.12f));
+                pulse.Insert(0f, icon.DOColor(fallback, flashIn));
+                pulse.Insert(flashIn, icon.DOColor(iconColors[index], flashOut));
             }
         }
     }

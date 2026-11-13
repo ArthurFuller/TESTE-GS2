@@ -71,9 +71,10 @@ Shader "GS2/Weather Particles"
                 else
                 {
                     float radius = length(p);
-                    float wisps = 0.7 + 0.3 * sin(p.x * 6.0 + p.y * 8.0 + _Time.y * 0.7) *
+                    float wisps = sin(p.x * 6.0 + p.y * 8.0 + _Time.y * 0.7) *
                         sin(p.x * 9.0 - p.y * 5.0 - _Time.y * 0.5);
-                    alpha = (1.0 - smoothstep(0.3, 1.0, radius)) * wisps;
+                    float edge = radius + wisps * 0.1;
+                    alpha = (1.0 - smoothstep(0.35, 0.95, edge)) * (0.7 + wisps * 0.2);
                 }
                 return half4(input.color.rgb, input.color.a * saturate(alpha));
             }

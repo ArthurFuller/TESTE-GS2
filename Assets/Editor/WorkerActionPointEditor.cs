@@ -26,6 +26,10 @@ public static class WorkerActionPointSync
         public Vector3 offset;
         public float spacing;
         public int previewCount;
+        public float spriteHeight;
+        public Vector3 spriteOffset;
+        public float idleFps;
+        public float runFps;
     }
 
     private const string Key = "Sertao.WorkerActionPoints.PlaySettings";
@@ -55,7 +59,11 @@ public static class WorkerActionPointSync
             size = data.FindProperty("actionPointSize").floatValue,
             offset = data.FindProperty("actionPointOffset").vector3Value,
             spacing = data.FindProperty("actionPointSpacing").floatValue,
-            previewCount = data.FindProperty("previewActionPoints").intValue
+            previewCount = data.FindProperty("previewActionPoints").intValue,
+            spriteHeight = data.FindProperty("testSpriteHeight").floatValue,
+            spriteOffset = data.FindProperty("spriteOffset").vector3Value,
+            idleFps = data.FindProperty("idleFps").floatValue,
+            runFps = data.FindProperty("runFps").floatValue
         };
     }
 
@@ -74,8 +82,13 @@ public static class WorkerActionPointSync
             data.FindProperty("actionPointOffset").vector3Value = settings.offset;
             data.FindProperty("actionPointSpacing").floatValue = settings.spacing;
             data.FindProperty("previewActionPoints").intValue = settings.previewCount;
+            data.FindProperty("testSpriteHeight").floatValue = settings.spriteHeight;
+            data.FindProperty("spriteOffset").vector3Value = settings.spriteOffset;
+            data.FindProperty("idleFps").floatValue = settings.idleFps;
+            data.FindProperty("runFps").floatValue = settings.runFps;
             data.ApplyModifiedProperties();
             worker.RefreshActionPointAppearance();
+            worker.RefreshSpriteAppearance();
         }
     }
 

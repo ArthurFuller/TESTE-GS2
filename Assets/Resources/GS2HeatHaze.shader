@@ -59,7 +59,7 @@ Shader "GS2/Heat Haze"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float mask = 1.0 - smoothstep(0.2, 0.82, input.uv.y);
+                float mask = 1.0 - smoothstep(0.12, 0.65, input.uv.y);
                 float wave = sin(input.uv.y * 130.0 - _Time.y * _Speed * 3.0 +
                     sin(input.uv.x * 23.0 + _Time.y * _Speed) * 2.0);
                 float2 screenUV = GetNormalizedScreenSpaceUV(input.positionCS);

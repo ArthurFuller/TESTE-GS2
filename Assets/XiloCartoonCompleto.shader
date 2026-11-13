@@ -8,6 +8,8 @@ Shader "Sertao/XiloCartoon Completo"
     {
         [Header(Cartoon)]
         [MainTexture] _BaseMap ("Textura Base", 2D) = "white" {}
+        [Normal] _BumpMap ("Mapa Normal", 2D) = "bump" {}
+        _NormalStrength ("Forca do Mapa Normal", Range(0, 2)) = 0
         [MainColor] _CorBase ("Cor Base", Color) = (0.77, 0.39, 0.23, 1)
         _CorSombra ("Cor da Sombra (multiplica)", Color) = (0.55, 0.45, 0.55, 1)
         _LimiteSombra ("Limite da Sombra", Range(0, 1)) = 0.5
@@ -19,6 +21,7 @@ Shader "Sertao/XiloCartoon Completo"
         _CorTraco ("Cor do Traco", Color) = (0.17, 0.10, 0.07, 1)
         _IntensidadeTraco ("Intensidade do Traco", Range(0, 1)) = 1
         _QuantidadeTraco ("Quantidade de Traco", Range(0, 1)) = 0.6
+        _TracoMinimo ("Traco Minimo na Luz", Range(0, 1)) = 0
         _LinhasPorMetro ("Linhas por Metro", Range(1, 100)) = 12
         _EspessuraTraco ("Espessura do Traco", Range(0.05, 1)) = 0.5
         _Tremido ("Tremido (linhas tortas)", Range(0, 2)) = 0.3
@@ -48,12 +51,14 @@ Shader "Sertao/XiloCartoon Completo"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
         TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
+        TEXTURE2D(_BumpMap); SAMPLER(sampler_BumpMap);
 
         CBUFFER_START(UnityPerMaterial)
             float4 _BaseMap_ST;
             half4 _CorBase, _CorSombra, _CorTraco, _CorTracoLuz, _CorLineArt;
             float _LimiteSombra, _SuavidadeSombra, _ForcaSombraProjetada, _InfluenciaLuz;
             float _IntensidadeTraco, _QuantidadeTraco, _LinhasPorMetro, _EspessuraTraco, _Tremido, _EscalaTremido;
+            float _NormalStrength, _TracoMinimo;
             float _Curvatura, _TamanhoCurva, _AnguloTraco, _Falhas, _TracoNoObjeto, _IntensidadeTracoLuz;
             float _EspessuraLineArt, _VariacaoLineArt, _EscalaVariacao, _FecharQuinas, _ContornoInterno;
         CBUFFER_END
@@ -77,13 +82,15 @@ Shader "Sertao/XiloCartoon Completo"
             #pragma multi_compile_instancing
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float4 tangentOS : TANGENT; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
                 float3 positionOS : TEXCOORD1;
                 float3 normalWS   : TEXCOORD2;
+                float3 tangentWS  : TEXCOORD5;
+                float3 bitangentWS: TEXCOORD6;
                 float2 uv         : TEXCOORD3;
                 float  fog        : TEXCOORD4;
                 UNITY_VERTEX_OUTPUT_STEREO
@@ -98,7 +105,10 @@ Shader "Sertao/XiloCartoon Completo"
                 o.positionCS = p.positionCS;
                 o.positionWS = p.positionWS;
                 o.positionOS = v.positionOS.xyz;
-                o.normalWS = TransformObjectToWorldNormal(v.normalOS);
+                VertexNormalInputs normals = GetVertexNormalInputs(v.normalOS, v.tangentOS);
+                o.normalWS = normals.normalWS;
+                o.tangentWS = normals.tangentWS;
+                o.bitangentWS = normals.bitangentWS;
                 o.uv = TRANSFORM_TEX(v.uv, _BaseMap);
                 o.fog = ComputeFogFactor(p.positionCS.z);
                 return o;
@@ -107,6 +117,13 @@ Shader "Sertao/XiloCartoon Completo"
             half4 frag(Varyings i) : SV_Target
             {
                 float3 N = normalize(i.normalWS);
+                if (_NormalStrength > 0.001)
+                {
+                    float3 normalTS = UnpackNormalScale(
+                        SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, i.uv), _NormalStrength);
+                    N = normalize(TransformTangentToWorld(normalTS,
+                        float3x3(normalize(i.tangentWS), normalize(i.bitangentWS), N)));
+                }
                 float3 W = i.positionWS;
 
                 // ---------- cartoon ----------
@@ -140,7 +157,8 @@ Shader "Sertao/XiloCartoon Completo"
                 float h = frac(sin(idx * 91.3458) * 47453.5453);
                 float g = sin(along * _LinhasPorMetro * 0.35 + h * 6.2831 + ruido);
                 float falha = step(1.0 - _Falhas * 2.0, g) * step(0.001, _Falhas);
-                float escuro = saturate((1.0 - lum) * _QuantidadeTraco * 2.0);
+                float escuro = max(saturate((1.0 - lum) * _QuantidadeTraco * 2.0),
+                    _TracoMinimo);
                 float largura = _EspessuraTraco * escuro * (0.85 + 0.3 * h);
                 float sombra = smoothstep(1.0 - largura - aa, 1.0 - largura + aa, perfil) * (1.0 - falha) * step(0.001, largura);
                 float perfil2 = abs(frac(x + 0.5) * 2.0 - 1.0);

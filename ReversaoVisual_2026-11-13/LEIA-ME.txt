@@ -1,0 +1,9 @@
+Cópias anteriores aos ajustes visuais de 13/11/2026.
+
+Para reverter, copie cada arquivo desta pasta para seu destino:
+PrototypeLayout.unity -> Assets/Scenes/PrototypeLayout.unity
+XiloCartoonCompleto.shader -> Assets/XiloCartoonCompleto.shader
+M_ChaoAreia.mat -> Assets/Modelos/ChaoAreia/Materiais/M_ChaoAreia.mat
+
+As cópias preservam os GUIDs originais, pois os arquivos .meta não foram alterados.
+Não é necessário voltar ProjectSettings ou outros materiais.

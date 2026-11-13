@@ -24,6 +24,12 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     [Header("Teste visual 2D")]
     [SerializeField] private Sprite testSprite;
     [SerializeField, Min(0.1f)] private float testSpriteHeight = 1.9f;
+    [SerializeField] private Vector3 spriteOffset = new Vector3(0f, 0.8f, 0f);
+    [Header("Animação do trabalhador")]
+    [SerializeField] private Sprite[] idleFrames;
+    [SerializeField] private Sprite[] runFrames;
+    [SerializeField, Min(1f)] private float idleFps = 8f;
+    [SerializeField, Min(1f)] private float runFps = 12f;
     [Header("Percurso da casa (ajustável em Play Mode)")]
     [SerializeField] private Transform homeMarker;
     [SerializeField] private Transform outsideMarker;
@@ -59,12 +65,17 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private Transform spriteVisual;
     private Camera spriteCamera;
     private Vector3 initialHomePosition;
+    private Vector3 previousPosition;
+    private float animationTime;
+    private int animationFrame;
+    private bool wasMoving;
 
     private void Awake()
     {
         if (homeMarker != null)
             transform.position = homeMarker.position;
         initialHomePosition = transform.position;
+        previousPosition = transform.position;
         spriteCamera = Camera.main;
         SetupTestSprite();
         if (comadreDizzyPrefab != null)
@@ -85,6 +96,7 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
             if (spriteCamera == null) spriteCamera = Camera.main;
             if (spriteCamera != null)
                 spriteVisual.rotation = Quaternion.Euler(0f, spriteCamera.transform.eulerAngles.y, 0f);
+            UpdateSpriteAnimation();
         }
         if (actionDotsRoot != null)
         {
@@ -96,7 +108,8 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
 
     private void SetupTestSprite()
     {
-        if (testSprite == null) return;
+        Sprite firstFrame = idleFrames != null && idleFrames.Length > 0 ? idleFrames[0] : testSprite;
+        if (firstFrame == null) return;
         Transform body = transform.Find("Corpo");
         Transform head = transform.Find("Cabeça");
         if (body != null) body.gameObject.SetActive(false);
@@ -109,11 +122,50 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
             spriteVisual.SetParent(transform, false);
         }
         SpriteRenderer visual = spriteVisual.GetComponent<SpriteRenderer>();
-        visual.sprite = testSprite;
+        visual.sprite = firstFrame;
         visual.spriteSortPoint = SpriteSortPoint.Pivot;
         visual.sortingOrder = 100;
-        spriteVisual.localPosition = new Vector3(0f, 0.05f, 0f);
-        spriteVisual.localScale = Vector3.one * (testSpriteHeight / testSprite.bounds.size.y);
+        RefreshSpriteAppearance();
+    }
+
+    public void RefreshSpriteAppearance()
+    {
+        if (spriteVisual == null) return;
+        SpriteRenderer renderer = spriteVisual.GetComponent<SpriteRenderer>();
+        if (renderer == null || renderer.sprite == null) return;
+        spriteVisual.localPosition = spriteOffset;
+        spriteVisual.localScale = Vector3.one * (testSpriteHeight / renderer.sprite.bounds.size.y);
+    }
+
+    private void UpdateSpriteAnimation()
+    {
+        Vector3 movement = transform.position - previousPosition;
+        previousPosition = transform.position;
+        bool moving = Time.deltaTime > 0f && movement.sqrMagnitude > 0.0025f * Time.deltaTime * Time.deltaTime;
+        Sprite[] frames = moving ? runFrames : idleFrames;
+        if (frames == null || frames.Length == 0) return;
+
+        SpriteRenderer renderer = spriteVisual.GetComponent<SpriteRenderer>();
+        if (moving && spriteCamera != null)
+        {
+            float horizontal = Vector3.Dot(movement, spriteCamera.transform.right);
+            if (Mathf.Abs(horizontal) > 0.0001f)
+                renderer.flipX = horizontal > 0f; // A arte original olha para a esquerda.
+        }
+        if (moving != wasMoving)
+        {
+            wasMoving = moving;
+            animationTime = 0f;
+            animationFrame = 0;
+        }
+        animationTime += Time.deltaTime;
+        float frameDuration = 1f / Mathf.Max(1f, moving ? runFps : idleFps);
+        while (animationTime >= frameDuration)
+        {
+            animationTime -= frameDuration;
+            animationFrame = (animationFrame + 1) % frames.Length;
+        }
+        renderer.sprite = frames[animationFrame];
     }
 
     private void OnDestroy()
