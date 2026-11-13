@@ -104,7 +104,7 @@ Material:
     - _EscalaTremido: 2
     - _EscalaVariacao: 1
     - _EspessuraLineArt: 3
-    - _EspessuraTraco: 0.77
+    - _EspessuraTraco: 0.399
     - _Falhas: 0.25
     - _FecharQuinas: 0.5
     - _ForcaSombraProjetada: 1
@@ -116,8 +116,8 @@ Material:
     - _IntensidadeTracoLuz: 0
     - _LimiteSombra: 0.5
     - _LinhasPorMetro: 4
-    - _NormalStrength: 0.35
     - _Metallic: 0
+    - _NormalStrength: 0.35
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _QuantidadeTraco: 0.66
@@ -131,8 +131,8 @@ Material:
     - _SuavidadeSombra: 0.03
     - _Surface: 0
     - _TamanhoCurva: 1
-    - _TracoNoObjeto: 0
     - _TracoMinimo: 0.28
+    - _TracoNoObjeto: 0
     - _Tremido: 0.3
     - _VariacaoLineArt: 0.4
     - _WorkflowMode: 1
