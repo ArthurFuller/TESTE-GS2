@@ -786,23 +786,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &5000000599
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 188939412}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a43c3ea8420d4ed8b24f729abb5c72e0, type: 3}
-  m_Name: ""
-  m_EditorClassIdentifier: Assembly-CSharp::CanvasButtonFeedback
-  hoverScale: 1.06
-  pressedScale: 0.93
-  hoverDuration: 0.16
-  punchDuration: 0.2
-  excludedButtons: []
 --- !u!114 &188939413
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5050,6 +5033,23 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2107863118}
   m_CullTransparentMesh: 1
+--- !u!114 &5000000599
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 188939412}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a43c3ea8420d4ed8b24f729abb5c72e0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CanvasButtonFeedback
+  hoverScale: 1.06
+  pressedScale: 0.93
+  hoverDuration: 0.16
+  punchDuration: 0.2
+  excludedButtons: []
 --- !u!223 &9850000001
 Canvas:
   m_ObjectHideFlags: 0
