@@ -6,12 +6,25 @@ using UnityEngine.UI;
 
 public sealed class FeedingMinigame : MonoBehaviour
 {
+    [Serializable]
+    private struct WorkerVisual
+    {
+        public bool useCustomPosition;
+        public Vector2 position;
+        public Vector2 imageSize;
+        [Min(0f)] public float hitboxMargin;
+    }
+
     [SerializeField] private CanvasGroup group;
     [SerializeField] private RectTransform panel;
     [SerializeField] private ResourceBank resources;
     [SerializeField] private Text foodCount;
     [SerializeField] private Text[] workerLabels;
     [SerializeField] private RectTransform[] workerTargets;
+    [Header("Visual dos até cinco funcionários")]
+    [SerializeField] private float workerRowY = -117.4f;
+    [SerializeField, Min(1f)] private float maximumWorkerSpacing = 178f;
+    [SerializeField] private WorkerVisual[] workerVisuals = new WorkerVisual[5];
     [SerializeField] private FeedingFoodIcon[] foodIcons;
     [SerializeField] private Sprite preparedFoodSprite;
     [SerializeField] private Sprite fishSprite;
@@ -40,16 +53,27 @@ public sealed class FeedingMinigame : MonoBehaviour
     private Image backdrop;
     private Color backdropColor;
     private RectTransform innerViewport;
+    private RectTransform[] workerHitAreas = new RectTransform[5];
     private FeedingFoodIcon reservedIcon;
     private Tween backEntrance;
     private Sequence transition;
     private Vector3 panelSceneScale;
     private Vector2 panelHome;
+#if UNITY_EDITOR
+    private const string PreviewWorkerName = "Prévia trabalhador ";
+#endif
     private static readonly SaleItem[] FoodKinds = { SaleItem.Food, SaleItem.Fish,
         SaleItem.Corn, SaleItem.Pumpkin, SaleItem.Jerimum, SaleItem.Milk, SaleItem.Eggs };
 
     private void Awake()
     {
+#if UNITY_EDITOR
+        if (Application.isPlaying && panel != null)
+            for (int i = panel.childCount - 1; i >= 0; i--)
+                if (panel.GetChild(i).name.StartsWith(PreviewWorkerName,
+                    StringComparison.Ordinal))
+                    Destroy(panel.GetChild(i).gameObject);
+#endif
         if (group != null)
         {
             backdrop = group.GetComponent<Image>();
@@ -86,12 +110,12 @@ public sealed class FeedingMinigame : MonoBehaviour
         // Os dois cards atuais já têm tamanho e posição definidos na cena.
         // O arranjo automático só é necessário para slots adicionais.
         if (workers.Length > workerTargets.Length)
-        {
             EnsureWorkerTargets(workers.Length);
-            LayoutWorkerTargets();
-        }
+        ApplyWorkerVisuals();
         reservedIcon = null;
         chosenFood = new SaleItem?[workers.Length];
+        FeedingReaction sharedReaction = workerTargets.Length > 0 && workerTargets[0] != null ?
+            workerTargets[0].GetComponentInChildren<FeedingReaction>(true) : null;
         for (int i = 0; i < workerTargets.Length; i++)
         {
             if (workerTargets[i] == null) continue;
@@ -99,7 +123,11 @@ public sealed class FeedingMinigame : MonoBehaviour
             if (character != null && character.gameObject.activeInHierarchy)
                 character.Play("Idle", 0, 0f);
             FeedingReaction reaction = workerTargets[i].GetComponentInChildren<FeedingReaction>(true);
-            if (reaction != null) reaction.ResetVisual();
+            if (reaction != null)
+            {
+                reaction.CopyStyleFrom(sharedReaction);
+                reaction.ResetVisual();
+            }
         }
         completed = onCompleted;
         cancelled = onCancelled;
@@ -204,25 +232,116 @@ public sealed class FeedingMinigame : MonoBehaviour
         }
     }
 
-    private void LayoutWorkerTargets()
+    private void ApplyWorkerVisuals()
     {
         int count = Mathf.Min(workers.Length, workerTargets.Length);
-        float width = count >= 4 ? 126f : 168f;
-        float spacing = count >= 4 ? 136f : 178f;
+        if (workerHitAreas.Length < count) Array.Resize(ref workerHitAreas, count);
+        float availableWidth = innerViewport != null ? innerViewport.rect.width : panel.rect.width;
         for (int i = 0; i < count; i++)
         {
             RectTransform target = workerTargets[i];
             if (target == null) continue;
-            target.anchoredPosition = new Vector2((i - (count - 1) * 0.5f) * spacing, -80f);
-            target.sizeDelta = new Vector2(width, 96f);
+            WorkerVisual visual = ApplyWorkerAppearance(target, i, count, availableWidth);
+            Vector2 size = target.sizeDelta;
+            Image characterImage = target.GetComponent<Image>();
+            if (characterImage != null) characterImage.raycastTarget = false;
+            RectTransform hit = target.Find("Alvo da alimentação") as RectTransform;
+            if (hit == null)
+            {
+                hit = (RectTransform)new GameObject("Alvo da alimentação",
+                    typeof(RectTransform)).transform;
+                hit.SetParent(target, false);
+            }
+            hit.anchorMin = hit.anchorMax = new Vector2(0.5f, 0.5f);
+            hit.anchoredPosition = Vector2.zero;
+            hit.sizeDelta = size + Vector2.one * (2f * visual.hitboxMargin);
+            workerHitAreas[i] = hit;
             if (workerLabels[i] == null) continue;
-            workerLabels[i].rectTransform.sizeDelta = new Vector2(width - 16f, 60f);
+            float spacing = WorkerSpacing(count, availableWidth);
+            workerLabels[i].rectTransform.sizeDelta = new Vector2(
+                Mathf.Min(152f, Mathf.Max(60f, spacing - 8f)), 60f);
             workerLabels[i].fontSize = count >= 4 ? 12 : 14;
             workerLabels[i].resizeTextForBestFit = true;
             workerLabels[i].resizeTextMinSize = 11;
             workerLabels[i].resizeTextMaxSize = count >= 4 ? 12 : 14;
         }
     }
+
+    private float WorkerSpacing(int count, float availableWidth) => count > 1 ?
+        Mathf.Min(maximumWorkerSpacing, (availableWidth - 100f) / (count - 1)) : 0f;
+
+    private WorkerVisual ApplyWorkerAppearance(RectTransform target, int index, int count,
+        float availableWidth)
+    {
+        WorkerVisual visual = workerVisuals != null && index < workerVisuals.Length ?
+            workerVisuals[index] : default;
+        target.anchoredPosition = visual.useCustomPosition ? visual.position :
+            new Vector2((index - (count - 1) * 0.5f) * WorkerSpacing(count, availableWidth),
+                workerRowY);
+        target.sizeDelta = visual.imageSize.x > 0f && visual.imageSize.y > 0f ?
+            visual.imageSize : new Vector2(72f, 72f);
+        return visual;
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        UnityEditor.EditorApplication.delayCall -= RefreshWorkerPreview;
+        UnityEditor.EditorApplication.delayCall += RefreshWorkerPreview;
+    }
+
+    private void OnDisable()
+    {
+        UnityEditor.EditorApplication.delayCall -= RefreshWorkerPreview;
+    }
+
+    private void RefreshWorkerPreview()
+    {
+        if (this == null || panel == null || workerTargets == null || workerTargets.Length == 0)
+            return;
+        if (Application.isPlaying)
+        {
+            if (open && workers != null) ApplyWorkerVisuals();
+            return;
+        }
+
+        if (UnityEditor.EditorApplication.isPlayingOrWillChangePlaymode ||
+            !gameObject.scene.IsValid()) return;
+        const int count = 5;
+        float availableWidth = panel.rect.width - 2f * innerFrameInset;
+        RectTransform source = workerTargets[workerTargets.Length - 1];
+        if (source == null) return;
+        for (int i = 0; i < count; i++)
+        {
+            RectTransform target;
+            if (i < workerTargets.Length)
+                target = workerTargets[i];
+            else
+            {
+                string previewName = PreviewWorkerName + (i + 1);
+                target = panel.Find(previewName) as RectTransform;
+                if (target == null)
+                {
+                    target = Instantiate(source, panel);
+                    target.name = previewName;
+                    target.gameObject.hideFlags = HideFlags.DontSaveInEditor | HideFlags.DontSaveInBuild;
+                    Animator animator = target.GetComponent<Animator>();
+                    if (animator != null) animator.enabled = false;
+                    Text label = target.GetComponentInChildren<Text>(true);
+                    if (label != null) label.text = "Trabalhador " + (i + 1);
+                }
+            }
+            if (target == null) continue;
+            target.gameObject.SetActive(true);
+            WorkerVisual visual = ApplyWorkerAppearance(target, i, count, availableWidth);
+            RectTransform hit = target.Find("Alvo da alimentação") as RectTransform;
+            if (hit != null)
+                hit.sizeDelta = target.sizeDelta + Vector2.one * (2f * visual.hitboxMargin);
+        }
+        UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+        UnityEditor.SceneView.RepaintAll();
+    }
+#endif
 
     public bool Reserve(FeedingFoodIcon icon)
     {
@@ -244,8 +363,11 @@ public sealed class FeedingMinigame : MonoBehaviour
         if (!open || transitioning || reservedIcon != icon) return null;
         int target = -1;
         for (int i = 0; i < workerTargets.Length && i < chosenFood.Length; i++)
-            if (CanFeed(i) && RectTransformUtility.RectangleContainsScreenPoint(
-                    workerTargets[i], eventData.position, eventData.pressEventCamera))
+            if (CanFeed(i) && workerHitAreas[i] != null &&
+                RectTransformUtility.RectangleContainsScreenPoint(workerHitAreas[i],
+                    eventData.position, eventData.pressEventCamera) &&
+                (innerViewport == null || RectTransformUtility.RectangleContainsScreenPoint(
+                    innerViewport, eventData.position, eventData.pressEventCamera)))
             {
                 target = i;
                 break;

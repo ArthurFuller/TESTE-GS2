@@ -32,6 +32,7 @@ public sealed class TopBarAutoHide : MonoBehaviour
     private bool timelineDayOpen;
     private bool closingAfterTimeline;
     private bool paused;
+    private bool followingWorker;
     private float lastHoverTime;
 
     private void Awake()
@@ -81,6 +82,11 @@ public sealed class TopBarAutoHide : MonoBehaviour
     private void Update()
     {
         if (paused || !dayActive) return;
+        if (followingWorker && (resourceHud == null || !resourceHud.HasFlyingResources))
+        {
+            if (open) SetOpen(false, false);
+            return;
+        }
 
         // Dragging takes precedence over hover, open panels and resource flights.
         if (hand != null && hand.IsDraggingCard)
@@ -135,6 +141,17 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
     public void RevealForResources() => PrepareResourceFeedback();
 
+    public void SetFollowingWorker(bool following)
+    {
+        followingWorker = following;
+        if (following) SetOpen(false, false);
+        else if (dayActive)
+        {
+            lastHoverTime = Time.unscaledTime;
+            SetOpen(true, false);
+        }
+    }
+
     // The day counter is the only manual close target for the top bar.
     public void CloseFromDayCounter()
     {
@@ -156,10 +173,9 @@ public sealed class TopBarAutoHide : MonoBehaviour
 
         lastHoverTime = Time.unscaledTime;
         if (!open) SetOpen(true, false);
-        if (bar == null || (bar.anchoredPosition - openPosition).sqrMagnitude < 0.01f)
-            return 0f;
+        if (bar == null) return 0f;
         return motion != null && motion.IsActive()
-            ? Mathf.Max(0f, slideDuration - motion.Elapsed()) : 0f;
+            ? Mathf.Max(0f, motion.Duration(false) - motion.Elapsed()) : 0f;
     }
 
     public void SetPaused(bool value)

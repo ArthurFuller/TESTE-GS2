@@ -63,6 +63,8 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
     private bool ducked;
     private bool entranceSuspended;
     private bool selectionLocked;
+    private bool followHidden;
+    private CanvasGroup handGroup;
     [SerializeField, Min(0.1f)] private float dayExitDuration = 0.38f;
     [SerializeField, Min(0f)] private float dayExitWaveDelay = 0.07f;
     public bool HasRoom => shown.Count + spent.Count + pendingRewards.Count < maxHandCards ||
@@ -71,6 +73,40 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
         pendingRewards.Count + testCards.Count);
     public bool ContainsCard(ActivityCardDrag card) => shown.Contains(card);
     public bool IsSelectionLocked => selectionLocked;
+    public void SetFollowingWorker(bool following)
+    {
+        if (followHidden == following) return;
+        ClearHover(true);
+        pointerInside = false;
+        followHidden = following;
+        if (handGroup == null) handGroup = transform.parent.GetComponent<CanvasGroup>();
+        if (handGroup != null)
+        {
+            handGroup.alpha = 1f;
+            handGroup.blocksRaycasts = !following;
+            handGroup.interactable = !following;
+        }
+        if (!following) Layout(true);
+        for (int i = 0; i < shown.Count; i++)
+        {
+            ActivityCardDrag card = shown[i];
+            if (card == null || !card.gameObject.activeSelf || card.IsDragging) continue;
+            RectTransform rect = (RectTransform)card.transform;
+            rect.DOKill();
+            float delay = i * dayExitWaveDelay;
+            float hiddenY = -rect.rect.height * normalScale - 80f;
+            if (following)
+                rect.DOAnchorPosY(hiddenY, dayExitDuration)
+                    .SetDelay(delay).SetEase(Ease.InCubic);
+            else
+            {
+                Vector2 target = CardPosition(i);
+                rect.anchoredPosition = new Vector2(target.x, hiddenY);
+                rect.DOAnchorPos(target, 0.42f)
+                    .SetDelay(delay).SetEase(Ease.OutBack);
+            }
+        }
+    }
     public bool IsDraggingCard
     {
         get
@@ -613,6 +649,7 @@ public sealed class ActivityCardAvailability : MonoBehaviour, IPointerEnterHandl
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
             rect.pivot = new Vector2(0.5f, 0f);
             Vector2 position = CardPosition(i) + Vector2.down * (ducked ? 40f : 0f);
+            if (followHidden) position.y = -rect.rect.height * normalScale - 80f;
             if (animate)
             {
                 rect.DOAnchorPos(position, 0.24f)

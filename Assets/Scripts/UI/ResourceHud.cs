@@ -170,12 +170,17 @@ public sealed class ResourceHud : MonoBehaviour
 
     public void DropOne(DropBatch batch, Vector3 worldOrigin)
     {
-        if (batch == null || batch.Released || canvasRect == null) return;
         Camera worldCamera = Camera.main;
         Vector2 screen = worldCamera != null ?
             (Vector2)worldCamera.WorldToScreenPoint(worldOrigin) :
             new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-        Vector2 origin = CanvasPoint(screen);
+        DropOneAtScreen(batch, screen, null);
+    }
+
+    public void DropOneAtScreen(DropBatch batch, Vector2 screenOrigin, Vector2? screenLanding)
+    {
+        if (batch == null || batch.Released || canvasRect == null) return;
+        Vector2 origin = CanvasPoint(screenOrigin);
         int index = batch.Icons.Count;
         var icon = new GameObject("Recurso dropado - " + batch.Kind,
             typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
@@ -192,10 +197,14 @@ public sealed class ResourceHud : MonoBehaviour
         image.raycastTarget = false;
         batch.Icons.Add(rect);
         float angle = index * 2.39996f;
-        Vector2 landing = origin + new Vector2(Mathf.Cos(angle) * 18f,
-            -35f + Mathf.Sin(angle) * 7f);
+        Vector2 landing = screenLanding.HasValue
+            ? CanvasPoint(screenLanding.Value) + new Vector2(Mathf.Cos(angle) * 16f,
+                Mathf.Sin(angle) * 9f)
+            : origin + new Vector2(Mathf.Cos(angle) * 18f,
+                -35f + Mathf.Sin(angle) * 7f);
         rect.DOScale(1f, 0.2f).SetEase(Ease.OutBack).SetId(this);
-        rect.DOAnchorPos(landing, 0.28f).SetEase(Ease.OutBounce).SetId(this);
+        rect.DOAnchorPos(landing, screenLanding.HasValue ? 0.4f : 0.28f)
+            .SetEase(screenLanding.HasValue ? Ease.OutCubic : Ease.OutBounce).SetId(this);
     }
 
     public void FlyDrops(DropBatch batch, System.Action onAllArrived = null)
@@ -256,8 +265,12 @@ public sealed class ResourceHud : MonoBehaviour
             return;
         }
         inFlight[(int)kind] += amount;
+        // A mudança no banco pode ter agendado a contagem antes de os ícones nascerem.
+        counterTweens[(int)kind]?.Kill();
+        counterTweens[(int)kind] = null;
         Refresh();
-        topBar?.RevealForResources();
+        if (topBar != null)
+            pauseSeconds = Mathf.Max(pauseSeconds, topBar.PrepareResourceFeedback());
         Vector2 origin = CanvasPoint(screenOrigin);
         int count = Mathf.Min(amount, Mathf.Max(1, maximumFlyingIcons));
         int pending = count;

@@ -10,8 +10,6 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
     [SerializeField, Min(1f)] private float hoverScale = 1.08f;
     [SerializeField, Range(0.5f, 1f)] private float pressedScale = 0.9f;
     [SerializeField, Min(0.05f)] private float duration = 0.16f;
-    [SerializeField] private bool tintOnHover = true;
-    [SerializeField] private bool outlineOnHover = true;
 
     private Button button;
     private Image image;
@@ -28,13 +26,6 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
     public bool IsAnimating => animating;
     public bool BlocksNewClicks => animating && animationStartedFrame != Time.frameCount;
 
-    public void UseScaleOnly()
-    {
-        tintOnHover = false;
-        outlineOnHover = false;
-        if (outline != null) outline.enabled = false;
-        if (image != null) image.color = originalColor;
-    }
 
     private void Awake()
     {
@@ -74,13 +65,13 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (button == null || !button.interactable) return;
+        if (button == null || !button.isActiveAndEnabled || !button.interactable) return;
         hovered = true;
-        if (outline != null) outline.enabled = outlineOnHover;
+        if (outline != null) outline.enabled = true;
         if (animating) return;
         rect.DOKill();
         rect.DOScale(originalScale * hoverScale, duration).SetEase(Ease.OutBack).SetUpdate(true);
-        if (tintOnHover && image != null)
+        if (image != null)
             image.DOColor(new Color(1f, 0.96f, 0.76f, originalColor.a), duration).SetUpdate(true);
     }
 
@@ -96,7 +87,8 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        if (!pressedEligible || animating) return;
+        if (!pressedEligible || animating || button == null || !button.isActiveAndEnabled ||
+            !button.interactable) return;
         pressedEligible = false;
         AudioManager.Play(SoundCue.UiClick);
         animating = true;
@@ -109,7 +101,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
             .OnComplete(() =>
             {
                 rect.localScale = originalScale * (hovered ? hoverScale : 1f);
-                if (image != null) image.color = tintOnHover && hovered ?
+                if (image != null) image.color = hovered ?
                     new Color(1f, 0.96f, 0.76f, originalColor.a) : originalColor;
                 animating = false;
             })
@@ -118,7 +110,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
 
     public void OnPointerDown(PointerEventData eventData)
     {
-        pressedEligible = !animating && button != null && button.interactable;
+        pressedEligible = !animating && button != null && button.isActiveAndEnabled && button.interactable;
     }
 
     public void ShakeRejected()
@@ -137,7 +129,7 @@ public sealed class HoverPunchButton : MonoBehaviour, IPointerEnterHandler,
             {
                 rect.localRotation = originalRotation;
                 rect.localScale = originalScale * (hovered ? hoverScale : 1f);
-                if (image != null) image.color = tintOnHover && hovered ?
+                if (image != null) image.color = hovered ?
                     new Color(1f, 0.96f, 0.76f, originalColor.a) : originalColor;
                 animating = false;
             })

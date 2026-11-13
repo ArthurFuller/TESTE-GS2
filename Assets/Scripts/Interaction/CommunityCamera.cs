@@ -1,7 +1,6 @@
 using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.UI;
 
 [RequireComponent(typeof(Camera), typeof(CinemachineBrain))]
 public sealed class CommunityCamera : MonoBehaviour
@@ -15,7 +14,8 @@ public sealed class CommunityCamera : MonoBehaviour
     [SerializeField] private bool useCustomViewBounds;
     [SerializeField] private Vector2 minimumView;
     [SerializeField] private Vector2 maximumView;
-    [SerializeField] private Button communityButton;
+    [SerializeField] private TopBarAutoHide topBar;
+    [SerializeField] private ActivityCardAvailability hand;
     [SerializeField, Min(0.1f)] private float panSpeed = 6f;
     [SerializeField, Min(0.1f)] private float zoomStep = 0.8f;
     [SerializeField, Min(0.1f)] private float keyboardZoomSpeed = 4f;
@@ -68,6 +68,7 @@ public sealed class CommunityCamera : MonoBehaviour
         }
     }
     public bool IsFollowing(Transform worker) => followed == worker;
+    public bool IsFollowingWorker => followed != null || heldView;
     public bool IsFollowReady => followed != null && workerShot != null && brain != null &&
         ReferenceEquals(brain.ActiveVirtualCamera, workerShot) && !brain.IsBlending &&
         Vector3.Distance(workerShot.transform.position,
@@ -78,8 +79,8 @@ public sealed class CommunityCamera : MonoBehaviour
         if (communityShot != null) communityShot.Priority.Value = 10;
         if (workerShot != null) workerShot.Priority.Value = 0;
         UseCurrentViewAsHome();
-        if (communityButton != null)
-            communityButton.onClick.AddListener(ReturnToCommunity);
+        if (topBar == null) topBar = FindFirstObjectByType<TopBarAutoHide>();
+        if (hand == null) hand = FindFirstObjectByType<ActivityCardAvailability>();
     }
 
     public void UseCurrentViewAsHome()
@@ -96,14 +97,12 @@ public sealed class CommunityCamera : MonoBehaviour
         heldView = false;
         velocity = Vector3.zero;
         if (workerShot != null) workerShot.Priority.Value = 0;
-        if (communityButton != null)
-            communityButton.gameObject.SetActive(false);
+        SetFollowUi(false);
     }
 
     private void OnDestroy()
     {
         ApplyHudShake(Vector2.zero);
-        if (communityButton != null) communityButton.onClick.RemoveListener(ReturnToCommunity);
     }
 
     private void Update()
@@ -187,7 +186,7 @@ public sealed class CommunityCamera : MonoBehaviour
         StopMinigameShake();
         followVelocity = Vector3.zero;
         workerShot.Priority.Value = 20;
-        if (communityButton != null) communityButton.gameObject.SetActive(true);
+        SetFollowUi(true);
     }
 
     public void ReturnToCommunity()
@@ -201,7 +200,7 @@ public sealed class CommunityCamera : MonoBehaviour
         manualDistance = homeDistance;
         ViewTransform.position = homePosition;
         if (workerShot != null) workerShot.Priority.Value = 0;
-        if (communityButton != null) communityButton.gameObject.SetActive(false);
+        SetFollowUi(false);
     }
 
     public void HoldCurrentView()
@@ -213,14 +212,18 @@ public sealed class CommunityCamera : MonoBehaviour
         followLocked = false;
         heldView = true;
         workerShot.Priority.Value = 20;
-        if (communityButton != null) communityButton.gameObject.SetActive(false);
+        SetFollowUi(true);
     }
 
     public void SetFollowLocked(bool locked)
     {
         followLocked = locked;
-        if (communityButton != null)
-            communityButton.gameObject.SetActive(followed != null && !locked);
+    }
+
+    private void SetFollowUi(bool following)
+    {
+        topBar?.SetFollowingWorker(following);
+        hand?.SetFollowingWorker(following);
     }
 
     public void ShakeWoodHit()

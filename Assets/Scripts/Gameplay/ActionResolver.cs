@@ -51,8 +51,9 @@ public sealed class ActionResolver : MonoBehaviour
         public bool Started;
         public float StillTime;
         public Vector3 LastPosition;
+        public Vector3? PositionOverride;
 
-        public Vector3 TargetPosition => Destination.position + Offset;
+        public Vector3 TargetPosition => PositionOverride ?? Destination.position + Offset;
 
         public GatheringTask(ActivityKind activity, Transform destination, Button button, Text label,
             Vector3 offset)
@@ -481,6 +482,7 @@ public sealed class ActionResolver : MonoBehaviour
         }
 
         task.Worker = worker;
+        task.PositionOverride = null;
         task.Arrived = false;
         task.Started = false;
         task.StillTime = 0f;
@@ -997,23 +999,32 @@ public sealed class ActionResolver : MonoBehaviour
         });
     }
 
-    private void VisitForestWorker() => VisitGatheringWorker(WaitingTask(forestTasks));
-    private void VisitFishingWorker() => VisitGatheringWorker(WaitingTask(fishingTasks));
+    private void VisitForestWorker() => VisitGatheringWorker(WaitingTask(forestTasks), forestVisitButton);
+    private void VisitFishingWorker() => VisitGatheringWorker(WaitingTask(fishingTasks), fishingVisitButton);
 
-    private static GatheringTask WaitingTask(GatheringTask[] tasks)
+    private GatheringTask WaitingTask(GatheringTask[] tasks)
     {
         if (tasks == null) return null;
+        GatheringTask nearest = null;
+        float nearestDistance = float.PositiveInfinity;
         foreach (GatheringTask task in tasks)
-            if (task.Worker != null && task.Arrived && !task.Started) return task;
-        foreach (GatheringTask task in tasks)
-            if (task.Worker != null && !task.Started) return task;
-        return null;
+        {
+            if (task.Worker == null || task.Started) continue;
+            float distance = (task.Worker.transform.position - task.TargetPosition).sqrMagnitude;
+            if (distance >= nearestDistance) continue;
+            nearestDistance = distance;
+            nearest = task;
+        }
+        return nearest;
     }
 
-    private void VisitGatheringWorker(GatheringTask task)
+    private void VisitGatheringWorker(GatheringTask task, Button button)
     {
         if (task?.Worker != null && activeMinigame == null)
+        {
+            button?.GetComponent<GatheringVisitButtonVisual>()?.ExitLeftFast();
             communityCamera.Follow(task.Worker.transform);
+        }
     }
 
     private void UpdateGathering(GatheringTask task)
@@ -1037,10 +1048,12 @@ public sealed class ActionResolver : MonoBehaviour
     private void UpdateVisitButton(GatheringTask task)
     {
         if (task?.Button == null) return;
+        GatheringVisitButtonVisual visual = task.Button.GetComponent<GatheringVisitButtonVisual>();
+        if (visual != null && visual.IsExiting) return;
         GatheringTask[] areaTasks = task.Activity == ActivityKind.CollectWood ? forestTasks : fishingTasks;
         GatheringTask waiting = WaitingTask(areaTasks);
         bool visible = waiting != null && activeMinigame == null &&
-            !communityCamera.IsFollowing(waiting.Worker.transform);
+            !communityCamera.IsFollowingWorker;
         if (task.Button.gameObject.activeSelf != visible)
             task.Button.gameObject.SetActive(visible);
         if (visible && task.Label != null)
@@ -1062,8 +1075,8 @@ public sealed class ActionResolver : MonoBehaviour
         task.Started = true;
         activeMinigame = task;
         communityCamera.SetFollowLocked(true);
-        UpdateVisitButton(forestTasks[0]);
-        UpdateVisitButton(fishingTasks[0]);
+        if (forestVisitButton != null) forestVisitButton.gameObject.SetActive(false);
+        if (fishingVisitButton != null) fishingVisitButton.gameObject.SetActive(false);
         busyWorkers++;
         worker.SetStatus("atividade interativa");
         gatheringGame.Begin(task.SelectedActivity, rating =>
@@ -1074,29 +1087,33 @@ public sealed class ActionResolver : MonoBehaviour
             communityCamera.HoldCurrentView();
             if (wood && rating >= 0)
             {
-                ResolveWoodGathering(worker, activity, rating);
+                ResolveWoodGathering(task, worker, activity, rating);
                 return;
             }
+            SendGatheringWorkerHome(worker);
             CompleteGathering(worker, activity, rating, () =>
             {
-                busyWorkers--;
-                activeMinigame = null;
-                communityCamera.ReturnToCommunity();
-                UpdateVisitButton(forestTasks[0]);
-                UpdateVisitButton(fishingTasks[0]);
+                FinishGatheringRound(task);
             }, fishDrops);
-            SendGatheringWorkerHome(worker);
         }, (activity == ActivityKind.Fish || activity == ActivityKind.FishPlus) &&
             dayEvents != null ? dayEvents.FishingReduction : 0,
             communityCamera.ShakeWoodHit, communityCamera.SetFishingTension,
             () =>
             {
                 if (fishDrops != null)
-                    resourceHud.DropOne(fishDrops, worker.transform.position + Vector3.up);
+                {
+                    Camera camera = Camera.main;
+                    Vector2 landing = camera != null
+                        ? (Vector2)camera.WorldToScreenPoint(worker.transform.position + Vector3.up)
+                        : gatheringGame.FishDropScreenPosition;
+                    resourceHud.DropOneAtScreen(fishDrops,
+                        gatheringGame.FishDropScreenPosition, landing);
+                }
             });
     }
 
-    private void ResolveWoodGathering(WorkerAssignment worker, ActivityKind activity, int rating)
+    private void ResolveWoodGathering(GatheringTask task, WorkerAssignment worker,
+        ActivityKind activity, int rating)
     {
         System.Action afterFall = () =>
         {
@@ -1118,19 +1135,46 @@ public sealed class ActionResolver : MonoBehaviour
             dropSequence.AppendInterval(0.28f);
             dropSequence.OnComplete(() =>
             {
+                SendGatheringWorkerHome(worker);
                 CompleteGathering(worker, activity, rating, () =>
                 {
-                    busyWorkers--;
-                    activeMinigame = null;
-                    UpdateVisitButton(forestTasks[0]);
-                    UpdateVisitButton(fishingTasks[0]);
+                    FinishGatheringRound(task);
                 }, drops);
-                communityCamera.ReturnToCommunity();
-                SendGatheringWorkerHome(worker);
             });
         };
         if (forestTrees != null) forestTrees.FallNear(worker.transform.position, afterFall);
         else afterFall();
+    }
+
+    private void FinishGatheringRound(GatheringTask finished)
+    {
+        busyWorkers--;
+        GatheringTask[] area = finished.Activity == ActivityKind.CollectWood ? forestTasks : fishingTasks;
+        GatheringTask next = WaitingTask(area);
+        activeMinigame = null;
+        if (next?.Worker != null)
+        {
+            bool wasAtArea = next.Arrived;
+            next.PositionOverride = finished.TargetPosition;
+            next.Arrived = false;
+            next.StillTime = 0f;
+            WorkerAssignment worker = next.Worker;
+            communityCamera.ReturnToCommunity();
+            communityCamera.Follow(worker.transform);
+            worker.SetStatus("indo para o minigame");
+            System.Action arrived = () =>
+            {
+                next.Arrived = true;
+                next.LastPosition = worker.transform.position;
+                next.StillTime = 0f;
+                worker.SetStatus("aguardando jogador");
+            };
+            if (wasAtArea) MoveWorker(worker, next.TargetPosition, arrived);
+            else MoveAlongRoute(worker, new[] { fencePassage.position, next.TargetPosition }, arrived);
+        }
+        else communityCamera.ReturnToCommunity();
+        UpdateVisitButton(forestTasks[0]);
+        UpdateVisitButton(fishingTasks[0]);
     }
 
     private void SendGatheringWorkerHome(WorkerAssignment worker)

@@ -128,13 +128,11 @@ public sealed class EventCardView : MonoBehaviour
         backdrop.gameObject.SetActive(true);
         AudioManager.Play(SoundCue.EventReveal);
         backdrop.transform.SetAsLastSibling();
-        backdrop.alpha = 0;
+        backdrop.alpha = 1f;
         backdrop.blocksRaycasts = true;
         card.anchoredPosition = homePosition + Vector2.up * entranceOffset;
         card.localScale = Vector3.one;
         card.localRotation = Quaternion.identity;
-        // O CanvasGroup também afeta os filhos: o card precisa chegar a alpha 1.
-        backdrop.DOFade(1f, entranceDuration);
         card.DOAnchorPos(homePosition, entranceDuration).SetEase(Ease.OutCubic)
             .OnComplete(() => card.DORotate(new Vector3(0, 0, swingDegrees), 0.12f)
                 .SetLoops(2, LoopType.Yoyo).OnComplete(() => card.localRotation = Quaternion.identity));

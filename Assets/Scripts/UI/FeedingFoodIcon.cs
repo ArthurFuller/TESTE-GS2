@@ -60,8 +60,10 @@ public sealed class FeedingFoodIcon : MonoBehaviour, IBeginDragHandler, IDragHan
         if (enterFromTop)
         {
             RectTransform viewport = rect.parent as RectTransform;
-            float hiddenY = viewport != null ? viewport.rect.yMax - rect.rect.yMin + 8f :
-                home.y + 110f;
+            // Nome e quantidade podem ultrapassar o retângulo do ícone.
+            Bounds contents = RectTransformUtility.CalculateRelativeRectTransformBounds(rect, rect);
+            float hiddenY = viewport != null ? viewport.rect.yMax - contents.min.y + 24f :
+                home.y + 140f;
             rect.anchoredPosition = new Vector2(home.x, hiddenY);
         }
         rect.DOAnchorPos(home, duration).SetDelay(delay).SetEase(Ease.OutBack)

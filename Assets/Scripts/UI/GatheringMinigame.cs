@@ -21,7 +21,6 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Min(0.2f)] private float minimumCrossingDuration = 0.55f;
     [SerializeField, Min(0f)] private float edgePadding = 8f;
     [SerializeField, Min(2)] private int rounds = 3;
-    [SerializeField, Min(0f)] private float targetWidthReduction = 10f;
     [SerializeField, Min(0f)] private float minimumTargetSeparation = 45f;
     [SerializeField, Min(0f)] private float nearTargetSpeedBoost = 1.1f;
     [Header("Pesca")]
@@ -31,9 +30,14 @@ public sealed class GatheringMinigame : MonoBehaviour
     [SerializeField, Min(1f)] private float fishingPlusDifficulty = 1.35f;
     [SerializeField, Min(0f)] private float hitPunchStrength = 0.08f;
     [SerializeField, Min(0f)] private float missShakeStrength = 14f;
-    [SerializeField, Min(0.05f)] private float fishDropPunchDuration = 0.23f;
+    [SerializeField, Min(0.05f)] private float fishDropPunchDuration = 0.28f;
     [SerializeField, Min(0f)] private float fishDropPunchGap = 0.04f;
-    [SerializeField, Min(0f)] private float fishDropPunchStrength = 0.13f;
+    [SerializeField, Min(0f)] private float fishDropPunchStrength = 0.055f;
+    [Header("Entrada")]
+    [SerializeField, Min(0.05f)] private float woodEntryDuration = 0.38f;
+    [SerializeField, Min(0.05f)] private float fishingEntryDuration = 0.32f;
+    [SerializeField, Min(0f)] private float fishingEntryHop = 12f;
+    [SerializeField, Min(0f)] private float fishingEntryHopDuration = 0.16f;
 
     private struct Layout
     {
@@ -66,7 +70,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     private RectTransform bar, panel, buttonRect, titleRect;
     private Image barImage;
     private Layout panelLayout, barLayout, markerLayout, targetLayout, titleLayout;
-    private bool layoutCaptured, fishing, fishingPlus, resolving;
+    private bool layoutCaptured, fishing, fishingPlus, resolving, entering;
     private bool fishingTensionStarted;
     private int round, hits;
     private float difficultyMultiplier, initialTargetWidth, previousTargetCenter;
@@ -74,6 +78,18 @@ public sealed class GatheringMinigame : MonoBehaviour
     private float fishingProgress, fishingElapsed;
 
     public bool CanStart() => ResolveReferences();
+    public Vector2 FishDropScreenPosition
+    {
+        get
+        {
+            RectTransform source = fishingFill != null ? fishingFill.rectTransform : bar;
+            Canvas canvas = source != null ? source.GetComponentInParent<Canvas>() : null;
+            Camera camera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? canvas.worldCamera : null;
+            return source != null ? RectTransformUtility.WorldToScreenPoint(camera,
+                source.TransformPoint(source.rect.center)) : Vector2.zero;
+        }
+    }
 
     private void Awake()
     {
@@ -108,9 +124,30 @@ public sealed class GatheringMinigame : MonoBehaviour
         previousTargetCenter = float.NaN;
         group.alpha = 1f;
         group.interactable = true;
-        group.blocksRaycasts = true;
+        group.blocksRaycasts = false;
         if (fishing) StartFishing();
         else StartWoodRound();
+        entering = true;
+        Vector2 destination = panelLayout.Position;
+        float travel = fishing ? panel.rect.width + 100f : panel.rect.height + 100f;
+        panel.anchoredPosition = destination + (fishing ? Vector2.right : Vector2.down) * travel;
+        if (fishing)
+            DOTween.Sequence().SetTarget(this).SetUpdate(true)
+                .Append(panel.DOAnchorPos(destination + Vector2.left * fishingEntryHop,
+                    fishingEntryDuration).SetEase(Ease.OutCubic))
+                .Append(panel.DOAnchorPos(destination, fishingEntryHopDuration)
+                    .SetEase(Ease.OutBack))
+                .OnComplete(FinishEntrance);
+        else panel.DOAnchorPos(destination, woodEntryDuration)
+            .SetEase(Ease.OutBack).SetUpdate(true).OnComplete(FinishEntrance);
+    }
+
+    private void FinishEntrance()
+    {
+        panel.anchoredPosition = panelLayout.Position;
+        entering = false;
+        group.interactable = true;
+        group.blocksRaycasts = true;
     }
 
     private bool ResolveReferences()
@@ -130,7 +167,7 @@ public sealed class GatheringMinigame : MonoBehaviour
         markerLayout = new Layout(marker);
         targetLayout = new Layout(greenTarget);
         if (titleRect != null) titleLayout = new Layout(titleRect);
-        initialTargetWidth = greenTarget.rect.width;
+        initialTargetWidth = greenTarget.rect.width * Mathf.Abs(greenTarget.localScale.x);
         layoutCaptured = initialTargetWidth > 0f;
         return layoutCaptured;
     }
@@ -151,7 +188,7 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void RefreshArt()
     {
-        if (title != null) title.gameObject.SetActive(true);
+        if (title != null) title.gameObject.SetActive(false);
         if (woodArtRoot != null) woodArtRoot.gameObject.SetActive(!fishing);
         if (fishingArtRoot != null) fishingArtRoot.gameObject.SetActive(fishing);
         if (woodActionButton != fishingActionButton)
@@ -166,7 +203,7 @@ public sealed class GatheringMinigame : MonoBehaviour
 
     private void Update()
     {
-        if (completed == null || resolving) return;
+        if (completed == null || resolving || entering) return;
         if (fishing)
         {
             fishingElapsed += Time.deltaTime;
@@ -180,7 +217,7 @@ public sealed class GatheringMinigame : MonoBehaviour
             return;
         }
         float proximity = 1f - Mathf.Clamp01(
-            Mathf.Abs(markerX - previousTargetCenter) / Mathf.Max(1f, greenTarget.rect.width * 2.5f));
+            Mathf.Abs(markerX - previousTargetCenter) / Mathf.Max(1f, initialTargetWidth * 2.5f));
         float crossing = Mathf.Max(minimumCrossingDuration,
             markerCrossingDuration * Mathf.Pow(speedMultiplierPerHit, hits));
         float speed = markerLimit * 2f / crossing * (1f + nearTargetSpeedBoost * proximity);
@@ -193,7 +230,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     // O botão da cena usa a mesma ação nos dois minigames.
     public void Stop()
     {
-        if (completed == null || resolving) return;
+        if (completed == null || resolving || entering) return;
         if (fishing)
         {
             if (Time.timeScale <= 0f) return;
@@ -248,15 +285,16 @@ public sealed class GatheringMinigame : MonoBehaviour
         int fishCount = fishingPlus ? (rating > 0 ? 4 : 2) : (rating > 0 ? 2 : 1);
         Sequence sequence = DOTween.Sequence().SetTarget(this);
         panel.DOKill();
-        panel.localScale = Vector3.one;
+        panel.localScale = panelLayout.Scale;
         if (rating == 0)
             sequence.Append(bar.DOShakeAnchorPos(0.2f, missShakeStrength, 10, 90f, false, true));
         for (int i = 0; i < fishCount; i++)
         {
-            sequence.Append(panel.DOPunchScale(Vector3.one * fishDropPunchStrength,
-                fishDropPunchDuration, 2));
-            sequence.InsertCallback(sequence.Duration() - fishDropPunchDuration * 0.5f,
-                () => fishDropped?.Invoke());
+            sequence.Append(panel.DOScale(panelLayout.Scale * (1f + fishDropPunchStrength),
+                fishDropPunchDuration * 0.45f).SetEase(Ease.OutSine));
+            sequence.AppendCallback(() => fishDropped?.Invoke());
+            sequence.Append(panel.DOScale(panelLayout.Scale,
+                fishDropPunchDuration * 0.55f).SetEase(Ease.InOutSine));
             if (i < fishCount - 1) sequence.AppendInterval(fishDropPunchGap);
         }
         sequence.AppendInterval(0.2f);
@@ -274,9 +312,8 @@ public sealed class GatheringMinigame : MonoBehaviour
     private void StartWoodRound()
     {
         float markerWidth = marker.rect.width;
-        float targetWidth = Mathf.Max(markerWidth * 1.75f, initialTargetWidth - round * targetWidthReduction);
-        greenTarget.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, targetWidth);
-        float targetLimit = Mathf.Max(0f, bar.rect.width * 0.5f - targetWidth * 0.5f - edgePadding);
+        float targetLimit = Mathf.Max(0f, bar.rect.width * 0.5f -
+            initialTargetWidth * 0.5f - edgePadding);
         float targetCenter = UnityEngine.Random.Range(-targetLimit, targetLimit);
         for (int attempt = 0; attempt < 12 && !float.IsNaN(previousTargetCenter) &&
             Mathf.Abs(targetCenter - previousTargetCenter) < minimumTargetSeparation; attempt++)
@@ -285,15 +322,13 @@ public sealed class GatheringMinigame : MonoBehaviour
             Mathf.Abs(targetCenter - previousTargetCenter) < minimumTargetSeparation)
             targetCenter = previousTargetCenter >= 0f ? -targetLimit : targetLimit;
         previousTargetCenter = targetCenter;
-        greenTarget.anchoredPosition = new Vector2(
-            targetCenter + (greenTarget.pivot.x - 0.5f) * targetWidth, greenTarget.anchoredPosition.y);
+        greenTarget.anchoredPosition = new Vector2(targetCenter,
+            greenTarget.anchoredPosition.y);
         markerLimit = Mathf.Max(0f, (bar.rect.width - markerWidth - edgePadding * 2f) * 0.5f);
         markerPivotOffset = (marker.pivot.x - 0.5f) * markerWidth;
         markerX = -markerLimit;
         markerDirection = 1f;
         marker.anchoredPosition = new Vector2(markerX + markerPivotOffset, marker.anchoredPosition.y);
-        if (title != null)
-            title.text = "MADEIRA: ACERTE O VERDE\n" + (round + 1) + "/" + rounds + " · ACERTOS: " + hits;
     }
 
     private void StartFishing()
@@ -301,8 +336,6 @@ public sealed class GatheringMinigame : MonoBehaviour
         fishingProgress = initialFishingProgress;
         fishingElapsed = 0f;
         UpdateFishingFill();
-        if (title != null)
-            title.text = fishingPlus ? "PESCA PLUS\n2 OU 4 PEIXES" : "PESCA\n1 OU 2 PEIXES";
     }
 
     private void UpdateFishingFill()
@@ -326,6 +359,7 @@ public sealed class GatheringMinigame : MonoBehaviour
     private void Hide()
     {
         AudioManager.StopFishingPull();
+        entering = false;
         if (group == null) return;
         group.alpha = 0f;
         group.interactable = false;

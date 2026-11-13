@@ -48,17 +48,20 @@ public sealed class ActiveMissionsPanel : MonoBehaviour
         if (contentGroup != null)
         {
             contentGroup.DOKill();
-            if (immediate) contentGroup.alpha = isOpen ? 1 : 0;
-            else contentGroup.DOFade(isOpen ? 1 : 0, animationDuration);
+            if (immediate || isOpen) contentGroup.alpha = isOpen ? 1 : 0;
+            else contentGroup.DOFade(0, animationDuration);
             contentGroup.interactable = isOpen;
-            contentGroup.blocksRaycasts = isOpen;
+            contentGroup.blocksRaycasts = isOpen && immediate;
         }
         if (contentRect != null)
         {
             contentRect.DOKill();
             if (immediate) contentRect.anchoredPosition = openPosition + Vector2.up * (isOpen ? 0 : hiddenOffset);
             else contentRect.DOAnchorPos(openPosition + Vector2.up * (isOpen ? 0 : hiddenOffset),
-                animationDuration).SetEase(Ease.OutCubic);
+                animationDuration).SetEase(Ease.OutCubic).OnComplete(() =>
+                {
+                    if (contentGroup != null && isOpen) contentGroup.blocksRaycasts = true;
+                });
         }
         if (toggleText != null) toggleText.text = isOpen ? "FECHAR" : "MISSÕES";
     }

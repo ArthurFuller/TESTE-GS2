@@ -111,7 +111,7 @@ public sealed class SeedMerchant : MonoBehaviour
         shopGroup.DOKill();
         shopGroup.blocksRaycasts = true;
         shopGroup.interactable = true;
-        shopGroup.DOFade(1, panelFadeDuration);
+        shopGroup.alpha = 1f;
         if (shopStatusText != null) shopStatusText.text = "Role a lista para ver todos os itens.";
     }
 

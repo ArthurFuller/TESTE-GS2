@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
 using System.Collections.Generic;
 
 public enum SertaoEventKind { None, Drought, Pests, Rain, Comadre, Calm, HeadOfCuia, Reforestation }
@@ -38,8 +37,6 @@ public sealed class DayEventController : MonoBehaviour
     [SerializeField] private EventCardView card;
     [SerializeField] private ResourceBank resources;
     [SerializeField] private ResourceHud resourceHud;
-    [SerializeField] private DayTimeline timeline;
-    [SerializeField] private RectTransform eventHudAnchor;
     [SerializeField] private Plot[] plots;
     [SerializeField] private WorkerAssignment[] workers;
     [Header("Artes dos eventos")]
@@ -71,10 +68,6 @@ public sealed class DayEventController : MonoBehaviour
     private int daysWithoutWoodForReforestation = 3;
     [SerializeField, Min(1), InspectorName("Madeiras recebidas")]
     private int reforestationWood = 4;
-    [Header("Eventos ativos no HUD")]
-    [SerializeField, Min(16f)] private float eventBadgeWidth = 38f;
-    [SerializeField, Min(16f)] private float eventBadgeHeight = 52f;
-    [SerializeField, Min(0f)] private float eventBadgeGap = 6f;
 
     private readonly List<ActiveGeneral> activeGeneralEvents = new();
     private SertaoEventKind lastAnnounced;
@@ -84,7 +77,6 @@ public sealed class DayEventController : MonoBehaviour
     private int lastWoodCollectionDay = 1;
     private int lastReforestationDay = -100;
     private int pendingWoodReward;
-    private readonly List<GameObject> eventBadges = new();
     private CropType pestTarget = CropType.None;
     public bool IsRaining => IsActive(SertaoEventKind.Rain);
     public bool IsDrought => IsActive(SertaoEventKind.Drought);
@@ -247,7 +239,6 @@ public sealed class DayEventController : MonoBehaviour
                 Description(announced), Art(announced), day));
         activeToday.Sort((a, b) => a.StartedOn.CompareTo(b.StartedOn));
         eventsByDay[day] = activeToday;
-        RefreshEventBadges(activeToday);
         lastAnnounced = announced;
         WeatherChanged?.Invoke();
         if (announced != SertaoEventKind.None && card != null)
@@ -330,34 +321,4 @@ public sealed class DayEventController : MonoBehaviour
         _ => "A exploração da floresta desorientou um trabalhador por " + comadreAbsenceDays + " dia(s)."
     };
 
-    private void RefreshEventBadges(List<TimelineEvent> events)
-    {
-        foreach (GameObject badge in eventBadges)
-            if (badge != null) Destroy(badge);
-        eventBadges.Clear();
-        if (eventHudAnchor == null || timeline == null) return;
-        for (int i = 0; i < events.Count; i++)
-        {
-            TimelineEvent active = events[i];
-            var node = new GameObject("Evento ativo - " + active.Title,
-                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
-            node.layer = 5;
-            RectTransform rect = (RectTransform)node.transform;
-            rect.SetParent(eventHudAnchor, false);
-            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(eventBadgeWidth, eventBadgeHeight);
-            rect.anchoredPosition = new Vector2(
-                (i - (events.Count - 1) * 0.5f) * (eventBadgeWidth + eventBadgeGap), 0f);
-            Image image = node.GetComponent<Image>();
-            image.sprite = active.Art;
-            image.preserveAspect = true;
-            image.color = active.Art != null ? Color.white : new Color(0.75f, 0.7f, 0.55f);
-            Button button = node.GetComponent<Button>();
-            button.transition = Selectable.Transition.None;
-            button.targetGraphic = image;
-            rect.gameObject.AddComponent<HoverPunchButton>().UseScaleOnly();
-            button.onClick.AddListener(() => timeline.InspectEventCard(rect, active));
-            eventBadges.Add(node);
-        }
-    }
 }

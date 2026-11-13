@@ -12,6 +12,15 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     [SerializeField] private ActionResolver actionResolver;
     [SerializeField] private WorkProgress workProgress;
     [SerializeField] private ParticleSystem comadreDizzyPrefab;
+    [Header("Pontos de ação")]
+    [SerializeField] private Sprite actionPointSprite;
+    [SerializeField, Min(0.01f)] private float actionPointSize = 0.16f;
+    [SerializeField, Tooltip("Posição em relação ao funcionário: X lateral, Y altura, Z profundidade.")]
+    private Vector3 actionPointOffset = new Vector3(0f, 1.65f, 0f);
+    [SerializeField, Min(0f)] private float actionPointSpacing = 0.2f;
+    [SerializeField, Range(0, 10), InspectorName("Prévia de pontos de ação"),
+        Tooltip("Mostra esta quantidade de pontos para ajustar o visual. Zero usa as ações reais; a prévia não concede ações.")]
+    private int previewActionPoints;
     [Header("Teste visual 2D")]
     [SerializeField] private Sprite testSprite;
     [SerializeField, Min(0.1f)] private float testSpriteHeight = 1.9f;
@@ -78,7 +87,11 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
                 spriteVisual.rotation = Quaternion.Euler(0f, spriteCamera.transform.eulerAngles.y, 0f);
         }
         if (actionDotsRoot != null)
-            actionDotsRoot.position = transform.position + Vector3.up * 1.65f;
+        {
+            actionDotsRoot.position = transform.position + actionPointOffset;
+            if (spriteCamera == null) spriteCamera = Camera.main;
+            if (spriteCamera != null) actionDotsRoot.rotation = spriteCamera.transform.rotation;
+        }
     }
 
     private void SetupTestSprite()
@@ -282,32 +295,59 @@ public sealed class WorkerAssignment : MonoBehaviour, IPointerClickHandler
     private void RefreshActionDots(bool animate)
     {
         if (actionDotsRoot == null) return;
-        while (actionDots.Count > actionsRemaining)
+        int visibleCount = previewActionPoints > 0 ? previewActionPoints : actionsRemaining;
+        while (actionDots.Count > visibleCount)
         {
             Transform dot = actionDots[actionDots.Count - 1];
             actionDots.RemoveAt(actionDots.Count - 1);
             dot.DOKill();
             if (animate)
-                DOTween.Sequence().Append(dot.DOPunchScale(Vector3.one * 0.08f, 0.13f))
+                DOTween.Sequence().Append(dot.DOPunchScale(dot.localScale * 0.35f, 0.13f))
                     .Append(dot.DOScale(Vector3.zero, 0.13f))
                     .OnComplete(() => { if (dot != null) Destroy(dot.gameObject); });
             else Destroy(dot.gameObject);
         }
-        while (actionDots.Count < actionsRemaining)
+        while (actionDots.Count < visibleCount)
         {
-            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "Ação " + (actionDots.Count + 1);
-            sphere.transform.SetParent(actionDotsRoot, false);
-            Collider hitbox = sphere.GetComponent<Collider>();
-            if (hitbox != null) Destroy(hitbox);
-            Transform dot = sphere.transform;
+            GameObject icon = new GameObject("Ação " + (actionDots.Count + 1),
+                typeof(SpriteRenderer));
+            icon.transform.SetParent(actionDotsRoot, false);
+            SpriteRenderer visual = icon.GetComponent<SpriteRenderer>();
+            visual.sprite = actionPointSprite;
+            visual.sortingOrder = 110;
+            Transform dot = icon.transform;
             actionDots.Add(dot);
-            dot.localScale = animate ? Vector3.zero : Vector3.one * 0.13f;
+            float spriteHeight = actionPointSprite != null ?
+                actionPointSprite.bounds.size.y : 1f;
+            Vector3 size = Vector3.one * (actionPointSize / Mathf.Max(0.01f, spriteHeight));
+            dot.localScale = animate ? Vector3.zero : size;
             if (animate)
-                DOTween.Sequence().Append(dot.DOScale(0.13f, 0.17f).SetEase(Ease.OutBack))
-                    .Append(dot.DOPunchScale(Vector3.one * 0.06f, 0.2f));
+                DOTween.Sequence().Append(dot.DOScale(size, 0.17f).SetEase(Ease.OutBack))
+                    .Append(dot.DOPunchScale(size * 0.35f, 0.2f));
         }
         for (int i = 0; i < actionDots.Count; i++)
-            actionDots[i].localPosition = new Vector3((i - (actionDots.Count - 1) * 0.5f) * 0.2f, 0f, 0f);
+            actionDots[i].localPosition = new Vector3(
+                (i - (actionDots.Count - 1) * 0.5f) * actionPointSpacing, 0f, 0f);
+    }
+
+    public void RefreshActionPointAppearance()
+    {
+        if (actionDotsRoot == null) return;
+        RefreshActionDots(false);
+        actionDotsRoot.position = transform.position + actionPointOffset;
+        float spriteHeight = actionPointSprite != null ?
+            actionPointSprite.bounds.size.y : 1f;
+        Vector3 scale = Vector3.one * (actionPointSize / Mathf.Max(0.01f, spriteHeight));
+        for (int i = 0; i < actionDots.Count; i++)
+        {
+            Transform dot = actionDots[i];
+            if (dot == null) continue;
+            dot.DOKill();
+            dot.localScale = scale;
+            dot.localPosition = new Vector3(
+                (i - (actionDots.Count - 1) * 0.5f) * actionPointSpacing, 0f, 0f);
+            SpriteRenderer renderer = dot.GetComponent<SpriteRenderer>();
+            if (renderer != null) renderer.sprite = actionPointSprite;
+        }
     }
 }

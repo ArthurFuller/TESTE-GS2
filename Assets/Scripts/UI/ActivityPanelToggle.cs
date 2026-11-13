@@ -34,9 +34,13 @@ public sealed class ActivityPanelToggle : MonoBehaviour
         cardsPanel.DOKill();
         cardsGroup.DOKill();
         cardsPanel.DOAnchorPos(isOpen ? openPosition : openPosition + Vector2.up * hiddenOffset,
-            animationDuration).SetEase(openingEase);
-        cardsGroup.DOFade(isOpen ? 1 : 0, animationDuration);
-        cardsGroup.blocksRaycasts = isOpen;
+            animationDuration).SetEase(openingEase).OnComplete(() =>
+            {
+                if (isOpen) cardsGroup.blocksRaycasts = true;
+            });
+        if (isOpen) cardsGroup.alpha = 1f;
+        else cardsGroup.DOFade(0, animationDuration);
+        cardsGroup.blocksRaycasts = false;
         cardsGroup.interactable = isOpen;
         UpdateButtonText();
     }

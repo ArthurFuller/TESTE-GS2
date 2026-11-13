@@ -144,13 +144,13 @@ public sealed class DayCycle : MonoBehaviour
         if (currentDay >= totalDays)
         {
             feedingOpen = true;
-            if (finishDayButton != null) finishDayButton.interactable = false;
+            if (finishDayButton != null) finishDayButton.enabled = false;
             if (hand != null) hand.ExitForDay(() => ShowDaySummary(0, 0, 0, 0));
             else ShowDaySummary(0, 0, 0, 0);
             return;
         }
         feedingOpen = true;
-        if (finishDayButton != null) finishDayButton.interactable = false;
+        if (finishDayButton != null) finishDayButton.enabled = false;
         if (hand != null) hand.ExitForDay(() => feedingGame.Begin(workers, FinishFeeding,
             CancelFeeding));
         else feedingGame.Begin(workers, FinishFeeding, CancelFeeding);
@@ -159,7 +159,7 @@ public sealed class DayCycle : MonoBehaviour
     private void CancelFeeding()
     {
         feedingOpen = false;
-        if (finishDayButton != null) finishDayButton.interactable = true;
+        if (finishDayButton != null) finishDayButton.enabled = true;
         if (hand != null) hand.ReturnAfterCancelledDay();
         DayClosingCancelled?.Invoke();
     }
@@ -220,7 +220,7 @@ public sealed class DayCycle : MonoBehaviour
         feedingOpen = false;
         summaryOpen = true;
         gameOver = currentDay >= totalDays;
-        if (finishDayButton != null) finishDayButton.interactable = false;
+        if (finishDayButton != null) finishDayButton.enabled = false;
         if (continueButton != null) continueButton.interactable = !gameOver;
         if (gameOver && continueButtonText != null) continueButtonText.text = "PARTIDA ENCERRADA";
 
@@ -312,7 +312,7 @@ public sealed class DayCycle : MonoBehaviour
         UpdateMarket();
         feedback.HideSummary();
         feedback.ShowMessage("Dia " + currentDay + " de " + totalDays);
-        if (finishDayButton != null) finishDayButton.interactable = true;
+        if (finishDayButton != null) finishDayButton.enabled = true;
         UpdateDayLabel();
         OpenDayAfterEvent(true);
     }
